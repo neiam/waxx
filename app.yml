@@ -1,0 +1,215 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: waxx
+---
+# RBAC for libcluster's Kubernetes strategy. The ServiceAccount on the
+# pod gets read-only access to its own namespace's pods + endpoints so
+# it can discover peer node IPs for Distributed Erlang.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: waxx
+  namespace: waxx
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: waxx-pod-reader
+  namespace: waxx
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: waxx-pod-reader
+  namespace: waxx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: waxx-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: waxx
+    namespace: waxx
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waxx
+  namespace: waxx
+  labels:
+    name: waxx
+    keel.sh/policy: force
+    keel.sh/trigger: poll
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      name: waxx
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        name: waxx
+    spec:
+      serviceAccountName: waxx
+      containers:
+        - image: r.g.gmp.io/neiam/waxx:latest
+          imagePullPolicy: Always
+          name: waxx
+          ports:
+            - containerPort: 4000
+          env:
+            - name: PHX_HOST
+              value: waxx.neiam.co
+            - name: PORT
+              value: "4000"
+            - name: PHX_SERVER
+              value: "true"
+            - name: POOL_SIZE
+              value: "10"
+
+            # Cluster glue: every pod becomes waxx@<pod-ip>.
+            # libcluster (Cluster.Strategy.Kubernetes) discovers peers
+            # via the K8s API (RBAC defined above); Phoenix.PubSub then
+            # fans card/workflow broadcasts out across nodes.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: RELEASE_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: erlang_cookie
+
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: secret_key_base
+
+            # Sentry DSN is optional — when the key is empty or absent
+            # the pod still starts and Sentry quietly no-ops.
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: elixir-args
+                  key: sentry_dsn
+                  optional: true
+
+            # Postgres creds come from the StackGres-managed auth secret
+            # (named after the SGCluster in pg.yml). runtime.exs reads
+            # these directly — no URL composition — so passwords with
+            # special characters don't get mangled by URL parsing.
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: waxx
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: superuser-username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: superuser-password
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      imagePullSecrets:
+        - name: gitlabgmp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: waxx-svc
+  namespace: waxx
+spec:
+  ports:
+    - port: 80
+      targetPort: 4000
+      protocol: TCP
+  selector:
+    name: waxx
+---
+# Headless service so libcluster's Kubernetes strategy can resolve all
+# pod IPs for peer discovery. Pods discover siblings via the endpoints
+# selector + namespace + service name in runtime.exs; epmd-less long-
+# name distribution does the actual node connection.
+apiVersion: v1
+kind: Service
+metadata:
+  name: waxx-headless
+  namespace: waxx
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - port: 4000
+      targetPort: 4000
+      protocol: TCP
+      name: http
+  selector:
+    name: waxx
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: waxx
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: waxx-ingress
+  namespace: waxx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: "traefik"
+    # Listen on both Traefik entrypoints. The middleware below redirects
+    # http → https for the `web` (port 80) entrypoint, so the app itself
+    # never has to issue a 301 (which broke the LiveView WS handshake).
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: waxx-redirect-https@kubernetescrd
+spec:
+  tls:
+    - hosts:
+        - waxx.neiam.co
+      secretName: waxx-tls
+  rules:
+    - host: waxx.neiam.co
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: waxx-svc
+                port:
+                  number: 80

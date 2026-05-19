@@ -1,0 +1,17 @@
+target/
+**/target/
+.git/
+.idea/
+.vscode/
+*.iml
+android/
+storage/
+models/
+assets/node_modules/
+assets/f/css/files/
+.DS_Store
+TODO.md
+README.md
+LICENSE.md
+Justfile
+tests/

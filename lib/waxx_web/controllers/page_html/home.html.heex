@@ -1,0 +1,220 @@
+<Layouts.app flash={@flash} current_scope={@current_scope} wide>
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section class="py-20 sm:py-28 text-center">
+      <p class="font-mono text-xs uppercase tracking-[0.25em] text-accent mb-4">Waxx</p>
+      <h1 class="text-4xl sm:text-6xl font-bold tracking-tight">
+        Kanban with workflows that actually mean something.
+      </h1>
+      <p class="text-base-content/70 text-lg sm:text-xl mt-6 max-w-2xl mx-auto leading-relaxed">
+        Define a reusable workflow template — stages, branching transitions, labels,
+        custom fields — then spin up boards that follow it. Cards only move along
+        the edges you drew, so the column layout is also the rulebook.
+      </p>
+      <div class="flex justify-center gap-3 mt-8">
+        <%= cond do %>
+          <% @current_scope && @current_scope.user -> %>
+            <.link navigate={~p"/boards"} class="btn btn-primary">
+              <.icon name="hero-rectangle-stack-micro" class="size-4" /> Open boards
+            </.link>
+            <.link navigate={~p"/workflow-templates"} class="btn btn-ghost">
+              <.icon name="hero-rectangle-group-micro" class="size-4" /> Templates
+            </.link>
+          <% Waxx.Accounts.registration_open?() -> %>
+            <.link navigate={~p"/users/register"} class="btn btn-primary">Get started</.link>
+            <.link navigate={~p"/users/log-in"} class="btn btn-ghost">Log in</.link>
+          <% true -> %>
+            <span class="btn btn-disabled" title="Registration is invite-only">
+              Get started · invite-only
+            </span>
+            <.link navigate={~p"/users/log-in"} class="btn btn-ghost">Log in</.link>
+        <% end %>
+      </div>
+    </section>
+
+    <section class="py-10 sm:py-14 flex justify-center">
+      <figure class="font-mono text-sm sm:text-base text-base-content/70 leading-loose border-l-2 border-accent pl-6">
+        <p>Wax on — draw the path</p>
+        <p>Cards flow where the graph permits</p>
+        <p>Wax off — ship the work</p>
+      </figure>
+    </section>
+
+    <section class="py-12 sm:py-16">
+      <h2 class="text-2xl sm:text-3xl font-bold mb-2">What's in the box</h2>
+      <p class="text-base-content/70 mb-8">
+        Real workflow modelling, not just three columns and good intentions.
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-arrows-right-left-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Branching workflows</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Each board's columns are a directed graph. Cards can only move along
+            transitions you defined — both the UI and the server enforce it. Visual
+            editor in the template draws the graph; backward edges loop out to the side.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-rectangle-group-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Reusable templates</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Stages, transitions, labels and custom fields live on a template.
+            Boards clone the template at creation time and then drift independently;
+            future template edits propagate by name to boards that haven't drifted.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-tag-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Labels and custom fields</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Tag cards with coloured labels, attach due dates, locations, free text,
+            or pick-one selects. Toggle "show on card" to surface a field as a chip
+            on the kanban tile.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-cursor-arrow-rays-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Drag, drop, assign</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            HTML5 drag-and-drop with green / red drop highlights that match the
+            workflow rules. Reorder within a column or drop into a new one — same
+            gesture, same enforcement. Multi-assign per card.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-bolt-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Live multiplayer</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Phoenix PubSub broadcasts every card change to other tabs viewing the
+            same board. Edit a template stage and every board using it grows the
+            new column in place.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-envelope-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Invite-only by default</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            App-level invites gate registration; board-level invites grant
+            membership on a specific board with a role (owner / editor / viewer).
+            Mint links from the UI or from <code class="font-mono">mix phx.gen.invite</code>.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-archive-box-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Auto-archive what's done</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Cards that sit in a terminal stage (no outgoing edges) longer
+            than the board's threshold drop out of the view automatically —
+            7 days by default, per-board configurable, blank disables. Per-stage
+            entry timestamp means title edits don't accidentally reset the clock.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-clock-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Board history</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Every card mutation lands in the activity log with actor and
+            timestamp. Denormalised meta strings mean the log stays readable
+            even after a stage is renamed or a card deleted. One click from
+            any board.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-eye-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Quiet labels when you need them</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            A per-user, per-board toggle collapses label chips to just
+            their coloured dots — same information at a glance, less ink
+            on the board. Sticks across sessions via a single user prefs
+            jsonb column.
+          </p>
+        </div>
+
+        <div class="border border-base-300 rounded-box p-5 bg-base-200">
+          <div class="flex items-center gap-2 mb-2">
+            <.icon name="hero-bars-3-bottom-left-micro" class="size-5 text-accent" />
+            <h3 class="font-semibold">Subboards — second dimension</h3>
+          </div>
+          <p class="text-sm text-base-content/80">
+            Split a board into rows. Stages run across the top, subboards
+            run down the side. Drag a card into a row to assign it; new
+            cards land in a "default" row until you move them. Same
+            workflow rules apply across the whole grid.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="py-12 sm:py-16">
+      <h2 class="text-2xl sm:text-3xl font-bold mb-2">From zero to a board in three steps</h2>
+      <p class="text-base-content/70 mb-8">
+        The shape of your work first, then the work.
+      </p>
+
+      <ol class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <li class="border border-base-300 rounded-box p-5 bg-base-200 flex flex-col gap-2">
+          <span class="font-mono text-xs text-accent">01</span>
+          <h3 class="font-semibold">Draw the workflow</h3>
+          <p class="text-sm text-base-content/80">
+            Open <code class="font-mono">/workflow-templates</code>, add a stage,
+            click another stage to draw a transition. Skip-ahead arrows arc out;
+            back edges loop. Add labels and custom fields while you're there.
+          </p>
+        </li>
+        <li class="border border-base-300 rounded-box p-5 bg-base-200 flex flex-col gap-2">
+          <span class="font-mono text-xs text-accent">02</span>
+          <h3 class="font-semibold">Create a board</h3>
+          <p class="text-sm text-base-content/80">
+            Pick a template. Waxx clones its stages, transitions, labels and
+            fields into a per-board copy you can tweak without breaking other boards.
+          </p>
+        </li>
+        <li class="border border-base-300 rounded-box p-5 bg-base-200 flex flex-col gap-2">
+          <span class="font-mono text-xs text-accent">03</span>
+          <h3 class="font-semibold">Invite, drag, ship</h3>
+          <p class="text-sm text-base-content/80">
+            Mint board invites for collaborators, drop cards into stages, watch
+            updates land in real time. The graph keeps everyone honest.
+          </p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="py-12 sm:py-16 text-center">
+      <h2 class="text-2xl sm:text-3xl font-bold mb-2">Phoenix LiveView, all the way down</h2>
+      <p class="text-base-content/70 max-w-2xl mx-auto">
+        Server-rendered HTML, websocket diffs, colocated JS hooks for drag and
+        drop, PubSub for fan-out, UUIDv7 primary keys so rows sort by creation
+        time, daisyUI themes including six ported from neiam-co plus a blueprint
+        palette. Open source.
+      </p>
+    </section>
+  </div>
+</Layouts.app>
