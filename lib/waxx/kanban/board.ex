@@ -11,6 +11,7 @@ defmodule Waxx.Kanban.Board do
     BoardLabel,
     BoardField,
     BoardActivity,
+    CardTemplate,
     Subboard,
     Membership,
     BoardInvite,
@@ -37,6 +38,7 @@ defmodule Waxx.Kanban.Board do
     has_many :invites, BoardInvite
     has_many :cards, Card
     has_many :activities, BoardActivity
+    has_many :card_templates, CardTemplate, preload_order: [asc: :name]
 
     timestamps(type: :utc_datetime)
   end

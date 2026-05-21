@@ -282,6 +282,87 @@ defmodule Waxx.KanbanTest do
     end
   end
 
+  describe "card notes + todos" do
+    test "add_card_note stamps the card's current stage on the note" do
+      user = AccountsFixtures.user_fixture()
+      template = build_template_with_two_stages_and_transition(user)
+      {:ok, board} = Kanban.create_board_from_template(user, template, %{"name" => "B"})
+      [from_stage, _done] = board.stages
+      {:ok, card} = Kanban.create_card(board, user, %{"title" => "T"})
+
+      {:ok, note} = Kanban.add_card_note(card, user, %{"body" => "hello", "kind" => "note"})
+      assert note.board_stage_id == from_stage.id
+      assert note.kind == "note"
+      assert note.done == false
+    end
+
+    test "toggle_card_note_done flips and back" do
+      user = AccountsFixtures.user_fixture()
+      template = build_template_with_two_stages_and_transition(user)
+      {:ok, board} = Kanban.create_board_from_template(user, template, %{"name" => "B"})
+      {:ok, card} = Kanban.create_card(board, user, %{"title" => "T"})
+
+      {:ok, todo} = Kanban.add_card_note(card, user, %{"body" => "x", "kind" => "todo"})
+      assert {:ok, %{done: true}} = Kanban.toggle_card_note_done(todo)
+
+      assert {:ok, %{done: false}} =
+               Kanban.toggle_card_note_done(%{todo | done: true})
+    end
+  end
+
+  describe "card templates" do
+    test "save_card_as_template snapshots labels by name + field values" do
+      user = AccountsFixtures.user_fixture()
+      template = build_template_with_two_stages_and_transition(user)
+      {:ok, _} = Waxx.Workflows.add_label(template, %{"name" => "bug"})
+      {:ok, _} = Waxx.Workflows.add_field(template, %{"name" => "due", "kind" => "date"})
+
+      {:ok, board} = Kanban.create_board_from_template(user, template, %{"name" => "B"})
+      board = Kanban.get_board_with_workflow!(board.id, user)
+      [bug_label] = board.labels
+      [due_field] = board.fields
+
+      {:ok, card} =
+        Kanban.create_card(board, user, %{"title" => "Repro", "description" => "steps"})
+
+      {:ok, _} = Kanban.toggle_card_label(card, bug_label)
+      {:ok, _} = Kanban.set_card_field_value(card, due_field, "2026-05-20")
+      {:ok, _} = Kanban.add_card_note(card, user, %{"body" => "ping qa", "kind" => "todo"})
+
+      card = Kanban.get_card(card.id)
+      {:ok, tpl} = Kanban.save_card_as_template(card, user, "bug-skeleton")
+
+      assert tpl.snapshot["title"] == "Repro"
+      assert tpl.snapshot["label_names"] == ["bug"]
+      assert tpl.snapshot["field_values"]["due"] == "2026-05-20"
+      assert [%{"body" => "ping qa", "kind" => "todo"}] = tpl.snapshot["notes"]
+    end
+
+    test "create_card_from_template resolves labels + fields by name" do
+      user = AccountsFixtures.user_fixture()
+      template = build_template_with_two_stages_and_transition(user)
+      {:ok, _} = Waxx.Workflows.add_label(template, %{"name" => "bug"})
+      {:ok, _} = Waxx.Workflows.add_field(template, %{"name" => "due", "kind" => "date"})
+
+      {:ok, board} = Kanban.create_board_from_template(user, template, %{"name" => "B"})
+      board = Kanban.get_board_with_workflow!(board.id, user)
+      [bug_label] = board.labels
+      [due_field] = board.fields
+
+      {:ok, source} = Kanban.create_card(board, user, %{"title" => "Source"})
+      {:ok, _} = Kanban.toggle_card_label(source, bug_label)
+      {:ok, _} = Kanban.set_card_field_value(source, due_field, "2026-06-01")
+
+      source = Kanban.get_card(source.id)
+      {:ok, tpl} = Kanban.save_card_as_template(source, user, "skel")
+      {:ok, fresh} = Kanban.create_card_from_template(board, user, tpl, %{"title" => "New"})
+
+      assert fresh.title == "New"
+      assert [%{name: "bug"}] = fresh.labels
+      assert [%{value: "2026-06-01"}] = fresh.field_values
+    end
+  end
+
   describe "subboards" do
     test "cards start in the default row and can be moved into a subboard" do
       user = AccountsFixtures.user_fixture()

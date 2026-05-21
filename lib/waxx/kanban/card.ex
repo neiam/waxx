@@ -11,6 +11,7 @@ defmodule Waxx.Kanban.Card do
     CardAssignee,
     CardLabel,
     CardFieldValue,
+    CardNote,
     Subboard
   }
 
@@ -36,6 +37,7 @@ defmodule Waxx.Kanban.Card do
     many_to_many :labels, BoardLabel, join_through: CardLabel, on_replace: :delete
 
     has_many :field_values, CardFieldValue
+    has_many :notes, CardNote, preload_order: [asc: :position, asc: :inserted_at]
 
     timestamps(type: :utc_datetime)
   end

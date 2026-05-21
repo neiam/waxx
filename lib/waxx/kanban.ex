@@ -30,7 +30,9 @@ defmodule Waxx.Kanban do
     Card,
     CardAssignee,
     CardLabel,
-    CardFieldValue
+    CardFieldValue,
+    CardNote,
+    CardTemplate
   }
 
   @pubsub Waxx.PubSub
@@ -718,7 +720,7 @@ defmodule Waxx.Kanban do
       from(c in Card,
         where: c.board_id == ^board.id,
         order_by: [asc: c.board_stage_id, asc: c.position, asc: c.inserted_at],
-        preload: [:assignees, :labels, :field_values, :created_by]
+        preload: [:assignees, :labels, :field_values, :notes, :created_by]
       )
       |> Repo.all()
 
@@ -760,6 +762,7 @@ defmodule Waxx.Kanban do
           :assignees,
           :labels,
           :field_values,
+          :notes,
           :created_by,
           :board_stage
         ])
@@ -983,6 +986,207 @@ defmodule Waxx.Kanban do
       {:ok, %{card | position: clamped}}
     end)
     |> broadcast_on_ok(card.board_id)
+  end
+
+  ## Card notes + todos -------------------------------------------------
+
+  @doc """
+  Adds a freeform note or todo to a card. Auto-stamps the card's current
+  `board_stage_id` so the entry renders in that stage's colour in the
+  card detail view — useful as a "what was happening in this stage"
+  journal even after the card has moved on.
+  """
+  def add_card_note(%Card{} = card, user, attrs) do
+    next_pos =
+      (Repo.one(
+         from(n in CardNote,
+           where: n.card_id == ^card.id,
+           select: max(n.position)
+         )
+       ) || -1) + 1
+
+    attrs =
+      attrs
+      |> stringify_keys()
+      |> Map.put("card_id", card.id)
+      |> Map.put_new("board_stage_id", card.board_stage_id)
+      |> Map.put_new("position", next_pos)
+      |> Map.put_new("created_by_id", actor_id(user))
+
+    case %CardNote{} |> CardNote.changeset(attrs) |> Repo.insert() do
+      {:ok, _} = result ->
+        broadcast_cards_changed(card.board_id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  def toggle_card_note_done(%CardNote{} = note) do
+    case note
+         |> CardNote.changeset(%{done: not note.done})
+         |> Repo.update() do
+      {:ok, updated} = result ->
+        if card = Repo.get(Card, updated.card_id), do: broadcast_cards_changed(card.board_id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  def update_card_note(%CardNote{} = note, attrs) do
+    case note |> CardNote.changeset(attrs) |> Repo.update() do
+      {:ok, updated} = result ->
+        if card = Repo.get(Card, updated.card_id), do: broadcast_cards_changed(card.board_id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  def delete_card_note(%CardNote{card_id: card_id} = note) do
+    case Repo.delete(note) do
+      {:ok, _} = result ->
+        if card = Repo.get(Card, card_id), do: broadcast_cards_changed(card.board_id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  ## Card templates -----------------------------------------------------
+
+  def list_card_templates(%Board{id: board_id}) do
+    Repo.all(from(t in CardTemplate, where: t.board_id == ^board_id, order_by: [asc: t.name]))
+  end
+
+  def get_card_template(id) do
+    Repo.get(CardTemplate, id)
+  end
+
+  @doc """
+  Snapshots a card into a per-board template. The snapshot stores label
+  *names* and field *names* (instead of ids) so the template stays
+  valid after rename. Notes/todos are captured too. Assignees and
+  stage/subboard are deliberately NOT snapshotted — they're context.
+  """
+  def save_card_as_template(%Card{} = card, user, name) do
+    card =
+      Repo.preload(card, [
+        :labels,
+        field_values: [:board_field],
+        notes: [:board_stage]
+      ])
+
+    snapshot = %{
+      "title" => card.title,
+      "description" => card.description,
+      "label_names" => Enum.map(card.labels, & &1.name),
+      "field_values" => for(v <- card.field_values, into: %{}, do: {v.board_field.name, v.value}),
+      "notes" =>
+        for n <- card.notes do
+          %{
+            "kind" => n.kind,
+            "body" => n.body,
+            "done" => n.done,
+            "stage_name" => n.board_stage && n.board_stage.name
+          }
+        end
+    }
+
+    %CardTemplate{}
+    |> CardTemplate.changeset(%{
+      board_id: card.board_id,
+      name: name,
+      snapshot: snapshot,
+      created_by_id: actor_id(user)
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Creates a new card on `board` seeded from the given template. Resolves
+  label and field references by name against the destination board's
+  current labels/fields; unknown ones are silently skipped. The new
+  card lands at the given stage/subboard like a normal `create_card`
+  call (the snapshot doesn't carry stage location).
+  """
+  def create_card_from_template(
+        %Board{} = board,
+        user,
+        %CardTemplate{snapshot: snap},
+        extra_attrs \\ %{}
+      ) do
+    base_attrs =
+      %{
+        "title" => snap["title"] || "Untitled",
+        "description" => snap["description"]
+      }
+      |> Map.merge(stringify_keys(extra_attrs))
+
+    Repo.transact(fn ->
+      with {:ok, card} <- create_card(board, user, base_attrs) do
+        board = Repo.preload(board, [:labels, :fields])
+        apply_label_names(card, board, snap["label_names"] || [])
+        apply_field_values(card, board, snap["field_values"] || %{})
+        apply_template_notes(card, board, snap["notes"] || [], user)
+        {:ok, get_card(card.id)}
+      end
+    end)
+  end
+
+  def delete_card_template(%CardTemplate{} = tpl), do: Repo.delete(tpl)
+
+  defp apply_label_names(card, board, names) do
+    labels_by_name = Map.new(board.labels, &{&1.name, &1})
+
+    for n <- names, label = labels_by_name[n], not is_nil(label) do
+      %CardLabel{}
+      |> CardLabel.changeset(%{card_id: card.id, board_label_id: label.id})
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:card_id, :board_label_id])
+    end
+  end
+
+  defp apply_field_values(card, board, values) do
+    fields_by_name = Map.new(board.fields, &{&1.name, &1})
+
+    for {name, value} <- values, field = fields_by_name[name], not is_nil(field) do
+      set_card_field_value(card, field, value)
+    end
+  end
+
+  defp apply_template_notes(card, board, notes, user) do
+    stages_by_name = Map.new(board.stages || [], &{&1.name, &1})
+
+    # If the board snapshot didn't preload stages, get them.
+    stages_by_name =
+      if map_size(stages_by_name) > 0 do
+        stages_by_name
+      else
+        board
+        |> Repo.preload(:stages)
+        |> Map.get(:stages)
+        |> Map.new(&{&1.name, &1})
+      end
+
+    for n <- notes do
+      stage_id =
+        case n["stage_name"] && stages_by_name[n["stage_name"]] do
+          %BoardStage{id: id} -> id
+          _ -> card.board_stage_id
+        end
+
+      add_card_note(card, user, %{
+        "body" => n["body"],
+        "kind" => n["kind"] || "note",
+        "done" => n["done"] == true,
+        "board_stage_id" => stage_id
+      })
+    end
   end
 
   ## helpers (positioning) -----------------------------------------------

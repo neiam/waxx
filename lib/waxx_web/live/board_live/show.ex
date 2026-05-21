@@ -34,6 +34,7 @@ defmodule WaxxWeb.BoardLive.Show do
          |> assign(:editing_card, false)
          |> assign(:card_edit_form, nil)
          |> assign(:hide_label_text, Accounts.hide_label_text?(user, board_id))
+         |> assign(:card_templates, Kanban.list_card_templates(board))
          |> assign(:new_card_form, to_form(%{"title" => "", "description" => ""}, as: "card"))}
     end
   end
@@ -124,12 +125,31 @@ defmodule WaxxWeb.BoardLive.Show do
       user = socket.assigns.current_scope.user
       board = socket.assigns.board
 
-      attrs =
+      base_attrs =
         params
         |> Map.put("board_stage_id", stage_id)
         |> Map.put("subboard_id", subboard_id)
+        # The template_id select is hand-rolled (not a form field) so
+        # it lives in the card params; pull it out before passing to
+        # the schema, which doesn't have that field.
+        |> Map.delete("template_id")
 
-      case Kanban.create_card(board, user, attrs) do
+      result =
+        case blank_to_nil(params["template_id"]) do
+          nil ->
+            Kanban.create_card(board, user, base_attrs)
+
+          tpl_id ->
+            case Kanban.get_card_template(tpl_id) do
+              nil ->
+                Kanban.create_card(board, user, base_attrs)
+
+              tpl ->
+                Kanban.create_card_from_template(board, user, tpl, base_attrs)
+            end
+        end
+
+      case result do
         {:ok, _card} ->
           {:noreply,
            socket
@@ -393,6 +413,78 @@ defmodule WaxxWeb.BoardLive.Show do
     end)
   end
 
+  def handle_event("add_note", %{"id" => card_id, "body" => body, "kind" => kind}, socket) do
+    guard_edit(socket, fn ->
+      card = Kanban.get_card(card_id)
+      user = socket.assigns.current_scope.user
+
+      cond do
+        is_nil(card) or card.board_id != socket.assigns.board.id ->
+          {:noreply, put_flash(socket, :error, "Card not found.")}
+
+        true ->
+          case Kanban.add_card_note(card, user, %{"body" => body, "kind" => kind}) do
+            {:ok, _} -> {:noreply, socket}
+            {:error, _} -> {:noreply, put_flash(socket, :error, "Couldn't add the note.")}
+          end
+      end
+    end)
+  end
+
+  def handle_event("toggle_note", %{"id" => id}, socket) do
+    guard_edit(socket, fn ->
+      case find_note_on_open_card(socket, id) do
+        nil ->
+          {:noreply, socket}
+
+        note ->
+          {:ok, _} = Kanban.toggle_card_note_done(note)
+          {:noreply, socket}
+      end
+    end)
+  end
+
+  def handle_event("delete_note", %{"id" => id}, socket) do
+    guard_edit(socket, fn ->
+      case find_note_on_open_card(socket, id) do
+        nil ->
+          {:noreply, socket}
+
+        note ->
+          {:ok, _} = Kanban.delete_card_note(note)
+          {:noreply, socket}
+      end
+    end)
+  end
+
+  def handle_event("save_card_as_template", %{"id" => card_id, "name" => name}, socket) do
+    guard_edit(socket, fn ->
+      card = Kanban.get_card(card_id)
+      user = socket.assigns.current_scope.user
+      name = (name || "") |> String.trim()
+
+      cond do
+        is_nil(card) or card.board_id != socket.assigns.board.id ->
+          {:noreply, put_flash(socket, :error, "Card not found.")}
+
+        name == "" ->
+          {:noreply, put_flash(socket, :error, "Template needs a name.")}
+
+        true ->
+          case Kanban.save_card_as_template(card, user, name) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> assign(:card_templates, Kanban.list_card_templates(socket.assigns.board))
+               |> put_flash(:info, "Saved as template “#{name}”.")}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Couldn't save template — name taken?")}
+          end
+      end
+    end)
+  end
+
   def handle_event("toggle_label", %{"card-id" => card_id, "label-id" => label_id}, socket) do
     guard_edit(socket, fn ->
       card = Kanban.get_card(card_id)
@@ -548,6 +640,7 @@ defmodule WaxxWeb.BoardLive.Show do
               role={@role}
               new_card_form={@new_card_form}
               board={@board}
+              card_templates={@card_templates}
               hide_label_text={@hide_label_text}
             />
 
@@ -562,6 +655,7 @@ defmodule WaxxWeb.BoardLive.Show do
                 role={@role}
                 new_card_form={@new_card_form}
                 board={@board}
+                card_templates={@card_templates}
                 hide_label_text={@hide_label_text}
               />
             <% end %>
@@ -750,6 +844,7 @@ defmodule WaxxWeb.BoardLive.Show do
   attr :role, :string, required: true
   attr :new_card_form, :any, required: true
   attr :board, :map, required: true
+  attr :card_templates, :list, default: []
   attr :hide_label_text, :boolean, default: false
 
   defp stage_cell(assigns) do
@@ -788,6 +883,16 @@ defmodule WaxxWeb.BoardLive.Show do
               phx-mounted={JS.focus()}
             />
             <.input field={@new_card_form[:description]} type="text" label="Description" />
+            <%= if @card_templates != [] do %>
+              <label class="label-text text-xs mt-2">From template (optional)</label>
+              <select
+                name="card[template_id]"
+                class="select select-sm select-bordered w-full"
+              >
+                <option value="">— blank —</option>
+                <option :for={t <- @card_templates} value={t.id}>{t.name}</option>
+              </select>
+            <% end %>
             <div class="flex gap-2 mt-2">
               <.button class="btn btn-primary btn-sm">Create</.button>
               <button type="button" phx-click="cancel_new_card" class="btn btn-ghost btn-sm">
@@ -845,6 +950,23 @@ defmodule WaxxWeb.BoardLive.Show do
           <div :if={card.assignees != []} class="flex flex-wrap gap-1 mt-2">
             <span :for={a <- card.assignees} class="badge badge-ghost badge-xs font-mono">
               {assignee_label(a)}
+            </span>
+          </div>
+          <% note_counts = count_notes(card) %>
+          <div
+            :if={note_counts.notes > 0 or note_counts.todo_total > 0}
+            class="flex gap-2 mt-2 text-[10px] opacity-60"
+          >
+            <span :if={note_counts.notes > 0} title="Notes" class="inline-flex items-center gap-0.5">
+              <.icon name="hero-document-text-micro" class="size-3" /> {note_counts.notes}
+            </span>
+            <span
+              :if={note_counts.todo_total > 0}
+              title="Todos done/total"
+              class="inline-flex items-center gap-0.5"
+            >
+              <.icon name="hero-check-circle-micro" class="size-3" />
+              {note_counts.todo_done}/{note_counts.todo_total}
             </span>
           </div>
         </article>
@@ -1049,6 +1171,80 @@ defmodule WaxxWeb.BoardLive.Show do
 
       <div class="p-4 border-b border-base-300">
         <h3 class="text-xs font-semibold uppercase tracking-wider opacity-60 mb-2">
+          Notes &amp; todos
+        </h3>
+
+        <ul class="flex flex-col gap-1 mb-2">
+          <li :if={@card.notes == []} class="text-xs opacity-60 italic">
+            Nothing yet. Add a note or a todo below.
+          </li>
+          <li
+            :for={n <- @card.notes}
+            id={"note-#{n.id}"}
+            class="flex items-start gap-2 border-l-2 pl-2 py-1"
+            style={"border-color: #{note_stage_color(n, @board) || "transparent"}"}
+          >
+            <%= if n.kind == "todo" do %>
+              <input
+                type="checkbox"
+                checked={n.done}
+                disabled={not Kanban.can_edit?(@role)}
+                phx-click="toggle_note"
+                phx-value-id={n.id}
+                class="checkbox checkbox-xs mt-1"
+              />
+            <% else %>
+              <.icon name="hero-document-text-micro" class="size-4 mt-1 opacity-60 shrink-0" />
+            <% end %>
+            <div class="flex-1 min-w-0">
+              <p class={[
+                "text-sm whitespace-pre-wrap break-words",
+                n.kind == "todo" and n.done and "line-through opacity-60"
+              ]}>
+                {n.body}
+              </p>
+              <p class="text-[10px] opacity-60 mt-0.5">
+                {note_stage_name(n, @board)}
+              </p>
+            </div>
+            <button
+              :if={Kanban.can_edit?(@role)}
+              type="button"
+              phx-click="delete_note"
+              phx-value-id={n.id}
+              class="btn btn-ghost btn-xs text-error"
+              title="Delete"
+            >
+              <.icon name="hero-x-mark-micro" class="size-3" />
+            </button>
+          </li>
+        </ul>
+
+        <.form
+          :if={Kanban.can_edit?(@role)}
+          for={%{}}
+          as={:note}
+          phx-submit="add_note"
+          phx-value-id={@card.id}
+          class="flex items-end gap-2"
+        >
+          <input
+            type="text"
+            name="body"
+            placeholder="Write a note or todo…"
+            required
+            class="input input-sm input-bordered flex-1"
+          />
+          <select name="kind" class="select select-sm select-bordered">
+            <option value="note">Note</option>
+            <option value="todo">Todo</option>
+          </select>
+          <.button class="btn btn-primary btn-sm">Add</.button>
+        </.form>
+      </div>
+
+      <div class="p-4 border-b border-base-300">
+        <h3 class="text-xs font-semibold uppercase tracking-wider opacity-60 mb-2">
           Move to (allowed transitions)
         </h3>
         <%= if @targets == [] do %>
@@ -1073,7 +1269,26 @@ defmodule WaxxWeb.BoardLive.Show do
         <% end %>
       </div>
 
-      <div class="p-4 flex justify-end">
+      <div class="p-4 flex justify-between items-center gap-2">
+        <.form
+          :if={Kanban.can_edit?(@role)}
+          for={%{}}
+          as={:template}
+          phx-submit="save_card_as_template"
+          phx-value-id={@card.id}
+          class="flex items-center gap-2"
+        >
+          <input
+            type="text"
+            name="name"
+            placeholder="Template name"
+            required
+            class="input input-xs input-bordered w-36"
+          />
+          <.button class="btn btn-ghost btn-xs">
+            <.icon name="hero-bookmark-square-micro" class="size-4" /> Save as template
+          </.button>
+        </.form>
         <button
           :if={Kanban.can_edit?(@role)}
           type="button"
@@ -1103,6 +1318,53 @@ defmodule WaxxWeb.BoardLive.Show do
     do: "background-color: #{c}; color: #111; border-color: transparent;"
 
   defp label_style(_), do: ""
+
+  # Looks up a note id against the currently-expanded card. Keeps the
+  # match scoped to the card the user is actually viewing — a stray
+  # phx-value-id from a previous render can't reach a note on someone
+  # else's card.
+  defp find_note_on_open_card(socket, note_id) do
+    case socket.assigns.expanded_card do
+      %{notes: notes} -> Enum.find(notes, &(&1.id == note_id))
+      _ -> nil
+    end
+  end
+
+  defp note_stage_color(%{board_stage_id: nil}, _board), do: nil
+
+  defp note_stage_color(%{board_stage_id: stage_id}, board) do
+    case Enum.find(board.stages, &(&1.id == stage_id)) do
+      %{color: c} when is_binary(c) and c != "" -> c
+      _ -> nil
+    end
+  end
+
+  defp note_stage_name(%{board_stage_id: nil}, _board), do: "(no stage)"
+
+  defp note_stage_name(%{board_stage_id: stage_id}, board) do
+    case Enum.find(board.stages, &(&1.id == stage_id)) do
+      %{name: name} -> name
+      _ -> "(stage gone)"
+    end
+  end
+
+  # Tally for the kanban tile chip row: how many freeform notes vs how
+  # many todos (done / total).
+  defp count_notes(card) do
+    Enum.reduce(card.notes || [], %{notes: 0, todo_total: 0, todo_done: 0}, fn n, acc ->
+      case n.kind do
+        "todo" ->
+          %{
+            acc
+            | todo_total: acc.todo_total + 1,
+              todo_done: acc.todo_done + if(n.done, do: 1, else: 0)
+          }
+
+        _ ->
+          %{acc | notes: acc.notes + 1}
+      end
+    end)
+  end
 
   # Fields whose values should be surfaced on the kanban tile.
   defp visible_field_values(card, board) do
