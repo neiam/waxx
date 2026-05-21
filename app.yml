@@ -155,9 +155,9 @@ spec:
     name: waxx
 ---
 # Headless service so libcluster's Kubernetes strategy can resolve all
-# pod IPs for peer discovery. Pods discover siblings via the endpoints
-# selector + namespace + service name in runtime.exs; epmd-less long-
-# name distribution does the actual node connection.
+# pod IPs for peer discovery. Pods discover siblings via this service's
+# Endpoints; the actual Erlang distribution traffic flows pod-IP →
+# pod-IP (4369 = epmd, 9100 = inet_dist pinned in rel/env.sh.eex).
 apiVersion: v1
 kind: Service
 metadata:
@@ -167,9 +167,9 @@ spec:
   clusterIP: None
   publishNotReadyAddresses: true
   ports:
-    - port: 4000
-      targetPort: 4000
-      protocol: TCP
+    - { name: http, port: 4000, targetPort: 4000, protocol: TCP }
+    - { name: epmd, port: 4369, targetPort: 4369, protocol: TCP }
+    - { name: dist, port: 9100, targetPort: 9100, protocol: TCP }
       name: http
   selector:
     name: waxx
