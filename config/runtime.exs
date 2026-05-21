@@ -97,6 +97,127 @@ if config_env() == :prod do
       ]
     ]
 
+  # Mailer adapter selection:
+  #
+  #   * SMTP_RELAY set  → Swoosh.Adapters.SMTP (via gen_smtp)
+  #   * otherwise       → Swoosh.Adapters.Logger
+  #
+  # The Logger adapter doesn't actually send mail — it logs the
+  # rendered email at :info — but it gets us off Swoosh.Adapters.Local
+  # (the dev mailbox), so the magic-link flow at least leaves a trail
+  # in the pod log when SMTP isn't configured.
+  smtp_tri = fn var, default ->
+    case System.get_env(var, default) do
+      v when v in ~w(always if_available never) -> String.to_existing_atom(v)
+      other -> raise "#{var} must be one of always|if_available|never, got: #{inspect(other)}"
+    end
+  end
+
+  # Eager-load the OS CA bundle into OTP's `public_key` cache. Without
+  # this, `:public_key.cacerts_get/0` returns `:undefined`, and
+  # `gen_smtp`'s internal default `tls_options` injects
+  # `cacerts: :undefined` — which `:ssl` then rejects as incompatible
+  # with `verify: :verify_peer`, clobbering our explicit `cacertfile`.
+  case :public_key.cacerts_load() do
+    :ok ->
+      :ok
+
+    {:error, reason} ->
+      require Logger
+      Logger.warning("public_key:cacerts_load failed: #{inspect(reason)} — TLS verify may fail")
+  end
+
+  # CA bundle for TLS verification. We pass both `cacertfile` (path)
+  # and rely on the cacerts_load above for `cacerts_get/0` to work,
+  # belt-and-braces. Override `SMTP_CACERTFILE` if your image puts the
+  # bundle elsewhere; set `SMTP_TLS_VERIFY=verify_none` for self-signed
+  # / private relays where you'd rather skip cert validation.
+  smtp_cacertfile =
+    System.get_env("SMTP_CACERTFILE", "/etc/ssl/certs/ca-certificates.crt")
+
+  smtp_verify =
+    case System.get_env("SMTP_TLS_VERIFY", "verify_peer") do
+      v when v in ~w(verify_peer verify_none) -> String.to_existing_atom(v)
+      other -> raise "SMTP_TLS_VERIFY must be verify_peer or verify_none, got: #{inspect(other)}"
+    end
+
+  # Resolve the CA store NOW (after `cacerts_load`) rather than letting
+  # the downstream stack call `cacerts_get/0` lazily. gen_smtp / ssl
+  # has a habit of evaluating it in a context where it still returns
+  # `:undefined`, which then collides with our `cacertfile`. Passing
+  # `cacerts: <list>` explicitly is unambiguous — `:ssl` honors it
+  # and never re-derives.
+  smtp_cacerts =
+    case :public_key.cacerts_get() do
+      certs when is_list(certs) and certs != [] -> certs
+      _ -> nil
+    end
+
+  mailer_opts =
+    if relay = System.get_env("SMTP_RELAY") do
+      tls_options =
+        [
+          verify: smtp_verify,
+          server_name_indication: String.to_charlist(relay),
+          depth: 99
+        ] ++
+          cond do
+            smtp_verify != :verify_peer ->
+              []
+
+            is_list(smtp_cacerts) ->
+              [cacerts: smtp_cacerts]
+
+            true ->
+              [cacertfile: smtp_cacertfile]
+          end
+
+      # Pin modern TLS at both the top level (read by gen_smtp before
+      # it calls :ssl.connect) and inside tls_options (read by :ssl
+      # itself). Matches the working pattern from gitgud.
+      tls_versions = [:"tlsv1.2", :"tlsv1.3"]
+
+      # gen_smtp 1.2 has two distinct connection paths with different
+      # option keys:
+      #
+      #   * `ssl: true` (port 465 implicit TLS) reads its TLS opts
+      #     from `sockopts`. `tls_options` is ignored on this path.
+      #   * `tls: :always|:if_available` (STARTTLS upgrade) reads from
+      #     `tls_options` — only used during do_STARTTLS.
+      #
+      # Without sockopts on the implicit-TLS path, OTP 28's `:ssl`
+      # falls through to its own defaults (verify_peer +
+      # `public_key.cacerts_get()` which returns `:undefined`) and
+      # bails with `{options, incompatible, [verify: verify_peer,
+      # cacerts: undefined]}`. Putting the same opts on both keys
+      # covers both relay setups.
+      ssl_opts = [{:versions, tls_versions} | tls_options]
+
+      [
+        adapter: Swoosh.Adapters.SMTP,
+        relay: relay,
+        port: String.to_integer(System.get_env("SMTP_PORT", "587")),
+        username: System.get_env("SMTP_USERNAME"),
+        password: System.get_env("SMTP_PASSWORD"),
+        tls: smtp_tri.("SMTP_TLS", "if_available"),
+        ssl: System.get_env("SMTP_SSL", "false") == "true",
+        auth: smtp_tri.("SMTP_AUTH", "if_available"),
+        allowed_tls_versions: tls_versions,
+        sockopts: ssl_opts,
+        tls_options: ssl_opts,
+        retries: 1,
+        no_mx_lookups: false
+      ]
+    else
+      [adapter: Swoosh.Adapters.Logger, level: :info]
+    end
+
+  config :waxx, Waxx.Mailer, mailer_opts
+
+  config :waxx, Waxx.Mailer,
+    from_name: System.get_env("MAIL_FROM_NAME", "Waxx"),
+    from_address: System.get_env("MAIL_FROM_ADDRESS") || "noreply@#{host}"
+
   config :waxx, WaxxWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     # Accept both http and https origins for the configured host. The
