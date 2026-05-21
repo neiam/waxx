@@ -88,30 +88,54 @@ spec:
             - name: RELEASE_COOKIE
               valueFrom:
                 secretKeyRef:
-                  name: elixir-args
-                  key: erlang_cookie
+                  name: waxx-secrets
+                  key: RELEASE_COOKIE
 
             - name: SECRET_KEY_BASE
               valueFrom:
                 secretKeyRef:
-                  name: elixir-args
-                  key: secret_key_base
+                  name: waxx-secrets
+                  key: SECRET_KEY_BASE
 
             # Sentry DSN is optional — when the key is empty or absent
             # the pod still starts and Sentry quietly no-ops.
             - name: SENTRY_DSN
               valueFrom:
                 secretKeyRef:
-                  name: elixir-args
-                  key: sentry_dsn
+                  name: waxx-secrets
+                  key: SENTRY_DSN
                   optional: true
+
+            # SMTP relay. With SMTP_RELAY unset/empty the mailer falls
+            # back to Swoosh.Adapters.Logger — no mail sent, but the
+            # rendered magic-link email shows up in pod logs at :info.
+            - name: SMTP_RELAY
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_RELAY,        optional: true } }
+            - name: SMTP_PORT
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_PORT,         optional: true } }
+            - name: SMTP_USERNAME
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_USERNAME,     optional: true } }
+            - name: SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_PASSWORD,     optional: true } }
+            - name: SMTP_TLS
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_TLS,          optional: true } }
+            - name: SMTP_SSL
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_SSL,          optional: true } }
+            - name: SMTP_AUTH
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_AUTH,         optional: true } }
+            - name: SMTP_TLS_VERIFY
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: SMTP_TLS_VERIFY,   optional: true } }
+            - name: MAIL_FROM_ADDRESS
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: MAIL_FROM_ADDRESS, optional: true } }
+            - name: MAIL_FROM_NAME
+              valueFrom: { secretKeyRef: { name: waxx-secrets, key: MAIL_FROM_NAME,    optional: true } }
 
             # Postgres creds come from the StackGres-managed auth secret
             # (named after the SGCluster in pg.yml). runtime.exs reads
             # these directly — no URL composition — so passwords with
             # special characters don't get mangled by URL parsing.
             - name: POSTGRES_HOST
-              value: postgres
+              value: postgres-waxx
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
@@ -119,12 +143,12 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: postgres
+                  name: postgres-waxx
                   key: superuser-username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres
+                  name: postgres-waxx
                   key: superuser-password
           readinessProbe:
             httpGet:

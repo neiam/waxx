@@ -194,9 +194,14 @@ diogramos. The pieces:
   Ingress with cert-manager.
 - **`pg.yml`** — StackGres SGCluster with the `citext` extension
   enabled (`users.email` is a `citext` column).
-- **`app-secrets.example.yml`** — template Secret carrying
-  `secret_key_base` and `erlang_cookie`. The Postgres password comes
-  from the StackGres-managed `postgres` Secret in the same namespace.
+- **`secrets.example.yml.tmpl`** — template Secret (`waxx-secrets`)
+  carrying `SECRET_KEY_BASE`, `RELEASE_COOKIE`, optional `SENTRY_DSN`,
+  and the full `SMTP_*` + `MAIL_FROM_*` env set for the mailer. The
+  `.tmpl` extension keeps `kubectl apply -f .` and Argo CD directory
+  globs from accidentally applying the placeholder values (which look
+  valid but crash the pod — `SECRET_KEY_BASE=REPLACE_ME` is only 10
+  bytes, Phoenix wants ≥64). The Postgres password comes from the
+  StackGres-managed `postgres-waxx` Secret in the same namespace.
 - **`.gitlab-ci.yml`** — Kaniko build to the container registry on
   pushes to `master`.
 
@@ -234,10 +239,16 @@ is visible in real time to a user on replica B.
 # 1. Apply the database
 kubectl apply -f pg.yml
 
-# 2. Fill in + apply the app secret
-cp app-secrets.example.yml app-secrets.yml
-$EDITOR app-secrets.yml
-kubectl apply -f app-secrets.yml
+# 2. Apply the app secret directly with real values (don't edit the
+#    .tmpl in place — its REPLACE_ME placeholders crash the pod).
+SKB=$(openssl rand -base64 64 | tr -d '\n')
+COOKIE=$(openssl rand -hex 32)
+kubectl -n waxx create secret generic waxx-secrets \
+  --from-literal=SECRET_KEY_BASE="$SKB" \
+  --from-literal=RELEASE_COOKIE="$COOKIE" \
+  --from-literal=SENTRY_DSN="" \
+  --from-literal=SMTP_RELAY="" \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 # 3. Apply the rest
 kubectl apply -f app.yml
