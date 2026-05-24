@@ -866,10 +866,9 @@ defmodule Waxx.Kanban do
 
     case result do
       {:ok, _} ->
-        log(card.board_id, opts[:actor], "card_deleted",
-          card_id: card.id,
-          meta: %{title: title}
-        )
+        # No card_id — the row is gone and the FK would reject the insert.
+        # `meta.title` keeps the entry readable in the history view.
+        log(card.board_id, opts[:actor], "card_deleted", meta: %{title: title})
 
       _ ->
         :ok

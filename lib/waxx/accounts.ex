@@ -313,6 +313,84 @@ defmodule Waxx.Accounts do
     :ok
   end
 
+  ## API tokens (native clients) ---------------------------------------
+
+  @doc """
+  Mints a new API token for a user. Returns the encoded token string.
+  Hand it to the client exactly once — the DB only stores the hash.
+
+  Accepts an optional `attrs` map with a `:label` (or `"label"`) used to
+  distinguish tokens in the device list.
+  """
+  def create_api_token(%User{} = user, attrs \\ %{}) do
+    {encoded_token, user_token} = UserToken.build_api_token(user, attrs)
+    Repo.insert!(user_token)
+    encoded_token
+  end
+
+  @doc """
+  Looks up a user by API token. Returns `{user, token_id}` or `nil` if the
+  token is missing, malformed, expired, or revoked. On success,
+  opportunistically refreshes `authenticated_at` if it's older than the
+  refresh threshold so an active client never gets logged out.
+
+  The token_id is returned so the auth plug can assign it on the conn,
+  which `DELETE /api/v1/sessions/current` uses to revoke the current
+  device specifically.
+  """
+  def fetch_user_by_api_token(token) when is_binary(token) do
+    with {:ok, query} <- UserToken.verify_api_token_query(token),
+         {user, token_struct} <- Repo.one(query) do
+      maybe_touch_api_token(token_struct)
+      {user, token_struct.id}
+    else
+      _ -> nil
+    end
+  end
+
+  def fetch_user_by_api_token(_), do: nil
+
+  defp maybe_touch_api_token(%UserToken{} = token_struct) do
+    if UserToken.api_token_needs_refresh?(token_struct) do
+      now = DateTime.utc_now(:second)
+
+      Repo.update_all(
+        from(t in UserToken, where: t.id == ^token_struct.id),
+        set: [authenticated_at: now]
+      )
+    end
+
+    :ok
+  end
+
+  @doc "Lists a user's active API tokens, newest first."
+  def list_api_tokens(%User{id: id}) do
+    from(t in UserToken,
+      where: t.user_id == ^id and t.context == "api",
+      order_by: [desc: t.authenticated_at],
+      select: %{
+        id: t.id,
+        label: t.label,
+        sent_to: t.sent_to,
+        authenticated_at: t.authenticated_at,
+        inserted_at: t.inserted_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc "Revokes a single API token by id, scoped to its owner."
+  def delete_api_token(%User{id: user_id}, token_id) do
+    {count, _} =
+      Repo.delete_all(
+        from(t in UserToken,
+          where: t.id == ^token_id and t.user_id == ^user_id and t.context == "api"
+        )
+      )
+
+    if count == 1, do: :ok, else: {:error, :not_found}
+  end
+
   ## Token helper
 
   defp update_user_and_delete_all_tokens(changeset) do

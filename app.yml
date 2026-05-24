@@ -187,6 +187,12 @@ kind: Service
 metadata:
   name: waxx-headless
   namespace: waxx
+  # Labels here propagate to the Endpoints object. libcluster's K8s
+  # strategy filters endpoints by labelSelector (not by service name),
+  # so without `name: waxx` here the Endpoints have no matching label
+  # and discovery silently returns zero peers.
+  labels:
+    name: waxx
 spec:
   clusterIP: None
   publishNotReadyAddresses: true
@@ -194,7 +200,6 @@ spec:
     - { name: http, port: 4000, targetPort: 4000, protocol: TCP }
     - { name: epmd, port: 4369, targetPort: 4369, protocol: TCP }
     - { name: dist, port: 9100, targetPort: 9100, protocol: TCP }
-      name: http
   selector:
     name: waxx
 ---

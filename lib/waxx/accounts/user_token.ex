@@ -12,10 +12,17 @@ defmodule Waxx.Accounts.UserToken do
   @change_email_validity_in_days 7
   @session_validity_in_days 14
 
+  # API tokens (context "api") issued to native clients. Expiry is measured
+  # against authenticated_at, which is bumped by the auth plug at most once
+  # per refresh window so an active client never gets logged out.
+  @api_token_validity_in_days 90
+  @api_token_refresh_after_seconds 24 * 60 * 60
+
   schema "users_tokens" do
     field :token, :binary
     field :context, :string
     field :sent_to, :string
+    field :label, :string
     field :authenticated_at, :utc_datetime
     belongs_to :user, Waxx.Accounts.User
 
@@ -108,5 +115,78 @@ defmodule Waxx.Accounts.UserToken do
 
   defp by_token_and_context_query(token, context) do
     from UserToken, where: [token: ^token, context: ^context]
+  end
+
+  ## API tokens ---------------------------------------------------------
+
+  @doc """
+  Builds an API token for native clients. Returns `{encoded_token, struct}`
+  — the caller is expected to insert the struct and hand `encoded_token`
+  back to the client over a secure channel exactly once.
+
+  Accepts an optional `label` (e.g. "Pixel 7, kitchen") to distinguish
+  tokens in the device list.
+  """
+  def build_api_token(user, attrs \\ %{}) do
+    token = :crypto.strong_rand_bytes(@rand_size)
+    hashed_token = :crypto.hash(@hash_algorithm, token)
+    now = DateTime.utc_now(:second)
+    label = attrs |> normalise_label() |> truncate_label()
+
+    {Base.url_encode64(token, padding: false),
+     %UserToken{
+       token: hashed_token,
+       context: "api",
+       sent_to: user.email,
+       label: label,
+       authenticated_at: now,
+       user_id: user.id
+     }}
+  end
+
+  defp normalise_label(attrs) do
+    case Map.get(attrs, :label) || Map.get(attrs, "label") do
+      nil -> nil
+      str when is_binary(str) -> str |> String.trim() |> nil_if_empty()
+      _ -> nil
+    end
+  end
+
+  defp nil_if_empty(""), do: nil
+  defp nil_if_empty(s), do: s
+
+  defp truncate_label(nil), do: nil
+  defp truncate_label(s), do: String.slice(s, 0, 80)
+
+  @doc """
+  Looks up an API token. Returns `{:ok, query}` selecting `{user, token}`
+  if the encoded token decodes; `:error` otherwise. The query enforces
+  the @api_token_validity_in_days window against `authenticated_at`.
+  """
+  def verify_api_token_query(token) when is_binary(token) do
+    case Base.url_decode64(token, padding: false) do
+      {:ok, decoded_token} ->
+        hashed_token = :crypto.hash(@hash_algorithm, decoded_token)
+
+        query =
+          from token in by_token_and_context_query(hashed_token, "api"),
+            join: user in assoc(token, :user),
+            where: token.authenticated_at > ago(@api_token_validity_in_days, "day"),
+            select: {user, token}
+
+        {:ok, query}
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc """
+  Returns true if the API token's `authenticated_at` is stale enough to
+  warrant a refresh write. Lets the auth plug skip the DB write on the
+  common path where the token was used recently.
+  """
+  def api_token_needs_refresh?(%UserToken{context: "api", authenticated_at: ts}) do
+    DateTime.diff(DateTime.utc_now(:second), ts, :second) >= @api_token_refresh_after_seconds
   end
 end

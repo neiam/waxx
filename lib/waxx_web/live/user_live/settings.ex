@@ -4,6 +4,7 @@ defmodule WaxxWeb.UserLive.Settings do
   on_mount {WaxxWeb.UserAuth, :require_sudo_mode}
 
   alias Waxx.Accounts
+  alias WaxxWeb.{PublicUrl, QR}
 
   @impl true
   def render(assigns) do
@@ -65,6 +66,102 @@ defmodule WaxxWeb.UserLive.Settings do
           Save Password
         </.button>
       </.form>
+
+      <div class="divider" />
+
+      <section id="api-tokens" class="text-left">
+        <.header>
+          Connected devices
+          <:subtitle>
+            API tokens issued to native clients (Android, scripts). Generate one
+            here and scan the QR with the app to pair it.
+          </:subtitle>
+        </.header>
+
+        <.form
+          for={@token_form}
+          id="token_form"
+          phx-submit="generate_api_token"
+          class="mt-4"
+        >
+          <.input
+            field={@token_form[:label]}
+            type="text"
+            label="Label (optional)"
+            placeholder="e.g. Pixel 7, kitchen"
+            maxlength="80"
+          />
+          <.button variant="primary" phx-disable-with="Generating...">
+            Generate token
+          </.button>
+        </.form>
+
+        <div :if={@just_created} class="card bg-base-200 p-4 mt-6 space-y-3">
+          <div class="alert alert-warning">
+            <.icon name="hero-exclamation-triangle" class="size-5" />
+            <span>
+              This is the only time the full token will be shown. Scan or copy it now.
+            </span>
+          </div>
+
+          <div class="flex flex-col md:flex-row items-center gap-4">
+            <div class="bg-white p-3 rounded">
+              {raw(@just_created.qr_svg)}
+            </div>
+            <div class="space-y-2 text-sm break-all">
+              <div><strong>Server URL</strong></div>
+              <code class="text-xs block">{@just_created.base_url}</code>
+              <div><strong>Token</strong></div>
+              <code class="text-xs block">{@just_created.token}</code>
+              <div><strong>Pairing URI</strong></div>
+              <code class="text-xs block">{@just_created.pair_uri}</code>
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="dismiss_token_panel"
+            >
+              Done — hide
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-6">
+          <h3 class="font-bold mb-2">Active tokens</h3>
+          <div :if={@api_tokens == []} class="text-sm opacity-70">
+            No tokens yet. Generate one above to pair a device.
+          </div>
+          <ul :if={@api_tokens != []} class="divide-y divide-base-300">
+            <li
+              :for={t <- @api_tokens}
+              id={"api-token-" <> t.id}
+              class="flex items-center justify-between py-2"
+            >
+              <div class="text-sm">
+                <div class="font-medium">
+                  {t.label || "(no label)"}
+                </div>
+                <div class="opacity-70 text-xs">
+                  Issued {format_ts(t.inserted_at)} ·
+                  Last seen {format_ts(t.authenticated_at)}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm text-error"
+                phx-click="revoke_api_token"
+                phx-value-id={t.id}
+                data-confirm="Revoke this token? The paired device will be logged out."
+              >
+                Revoke
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
     </Layouts.app>
     """
   end
@@ -94,6 +191,10 @@ defmodule WaxxWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
+      |> assign(:token_form, to_form(%{"label" => ""}, as: "token"))
+      |> assign(:just_created, nil)
+      |> assign(:api_tokens, Accounts.list_api_tokens(user))
+      |> assign(:public_base_url, PublicUrl.derive(socket))
 
     {:ok, socket}
   end
@@ -156,5 +257,44 @@ defmodule WaxxWeb.UserLive.Settings do
       changeset ->
         {:noreply, assign(socket, password_form: to_form(changeset, action: :insert))}
     end
+  end
+
+  def handle_event("generate_api_token", %{"token" => params}, socket) do
+    user = socket.assigns.current_scope.user
+    true = Accounts.sudo_mode?(user)
+
+    encoded = Accounts.create_api_token(user, params)
+    base_url = socket.assigns.public_base_url
+    pair_uri = "waxx://pair?" <> URI.encode_query(%{base: base_url, token: encoded})
+
+    just_created = %{
+      token: encoded,
+      base_url: base_url,
+      pair_uri: pair_uri,
+      qr_svg: QR.svg(pair_uri)
+    }
+
+    {:noreply,
+     socket
+     |> assign(:just_created, just_created)
+     |> assign(:token_form, to_form(%{"label" => ""}, as: "token"))
+     |> assign(:api_tokens, Accounts.list_api_tokens(user))}
+  end
+
+  def handle_event("revoke_api_token", %{"id" => id}, socket) do
+    user = socket.assigns.current_scope.user
+    _ = Accounts.delete_api_token(user, id)
+
+    {:noreply, assign(socket, :api_tokens, Accounts.list_api_tokens(user))}
+  end
+
+  def handle_event("dismiss_token_panel", _params, socket) do
+    {:noreply, assign(socket, :just_created, nil)}
+  end
+
+  defp format_ts(nil), do: "—"
+
+  defp format_ts(%DateTime{} = dt) do
+    Calendar.strftime(dt, "%Y-%m-%d %H:%M UTC")
   end
 end

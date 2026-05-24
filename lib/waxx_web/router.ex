@@ -23,16 +23,16 @@ defmodule WaxxWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :api_authenticated do
+    plug :accepts, ["json"]
+    plug WaxxWeb.Api.Auth
+  end
+
   scope "/", WaxxWeb do
     pipe_through :browser
 
     get "/", PageController, :home
   end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", WaxxWeb do
-  #   pipe_through :api
-  # end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:waxx, :dev_routes) do
@@ -91,6 +91,49 @@ defmodule WaxxWeb.Router do
       # (anon users get bounced to login with the invite URL stored as
       # user_return_to).
       get "/b/:token", BoardInviteController, :show
+
+      # Shared magic-link handoff. Android App Links intercept this URL
+      # before the browser sees it; browsers fall through to the existing
+      # /users/log-in/:token LiveView flow.
+      get "/m/:token", MagicLinkController, :show
+    end
+
+    # JSON API for native clients. Public endpoints (no token required)
+    # live under the :api pipeline; authenticated ones go through
+    # :api_authenticated which installs WaxxWeb.Api.Auth.
+    scope "/api/v1", WaxxWeb.Api.V1, as: :api_v1 do
+      pipe_through :api
+
+      post "/sessions/request_magic_link", SessionController, :request_magic_link
+      post "/sessions/redeem", SessionController, :redeem
+    end
+
+    scope "/api/v1", WaxxWeb.Api.V1, as: :api_v1 do
+      pipe_through :api_authenticated
+
+      delete "/sessions/current", SessionController, :delete
+      get "/users/me", UserController, :me
+
+      get "/boards", BoardController, :index
+      get "/boards/:id", BoardController, :show
+      get "/boards/:board_id/workflow", BoardController, :workflow
+      get "/boards/:board_id/cards", BoardController, :cards
+      get "/boards/:board_id/history", BoardController, :history
+
+      post "/boards/:board_id/cards", CardController, :create
+      patch "/cards/:id", CardController, :update
+      post "/cards/:id/move", CardController, :move
+      delete "/cards/:id", CardController, :delete
+
+      get "/cards/:id", CardController, :show
+      post "/cards/:id/labels/:label_id/toggle", CardController, :toggle_label
+      put "/cards/:id/fields/:field_id", CardController, :set_field
+      post "/cards/:id/assignees", CardController, :add_assignee
+      delete "/cards/:id/assignees/:user_id", CardController, :remove_assignee
+
+      post "/cards/:card_id/notes", NoteController, :create
+      patch "/notes/:id", NoteController, :update
+      delete "/notes/:id", NoteController, :delete
     end
   end
 end

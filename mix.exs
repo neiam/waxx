@@ -70,7 +70,8 @@ defmodule Waxx.MixProject do
       {:bandit, "~> 1.5"},
       {:libcluster, "~> 3.4"},
       {:sentry, "~> 10.0"},
-      {:hackney, "~> 1.20"}
+      {:hackney, "~> 1.20"},
+      {:eqrcode, "~> 0.2.0"}
     ]
   end
 

@@ -35,4 +35,16 @@ defmodule WaxxWeb.ConnCase do
     Waxx.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Sets up a logged-in session for a user. The session token is freshly
+  minted, so `authenticated_at` is `now` and sudo mode is satisfied.
+  """
+  def log_in_user(conn, user) do
+    token = Waxx.Accounts.generate_user_session_token(user)
+
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> Plug.Conn.put_session(:user_token, token)
+  end
 end

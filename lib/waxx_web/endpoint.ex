@@ -11,9 +11,17 @@ defmodule WaxxWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # :uri and :x_headers are exposed so LiveViews can derive the public-facing
+  # base URL (see WaxxWeb.PublicUrl) for things like the API-token pairing QR.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:uri, :x_headers, session: @session_options]],
+    longpoll: [connect_info: [:uri, :x_headers, session: @session_options]]
+
+  # Native-client channels socket. Authenticated by api-context bearer
+  # passed as `?token=...` at connect time; see WaxxWeb.UserSocket.
+  socket "/socket", WaxxWeb.UserSocket,
+    websocket: true,
+    longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.
   #
