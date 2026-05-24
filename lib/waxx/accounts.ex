@@ -68,7 +68,10 @@ defmodule Waxx.Accounts do
 
   @doc "Creates an invite token, owned by the given user."
   def create_invite(%User{id: id}, attrs \\ %{}) do
-    attrs = Map.put(attrs, :created_by_id, id)
+    attrs =
+      attrs
+      |> Map.new(fn {k, v} -> {to_string(k), v} end)
+      |> Map.put("created_by_id", id)
 
     %Invite{}
     |> Invite.create_changeset(attrs)

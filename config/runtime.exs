@@ -106,9 +106,14 @@ if config_env() == :prod do
   # rendered email at :info — but it gets us off Swoosh.Adapters.Local
   # (the dev mailbox), so the magic-link flow at least leaves a trail
   # in the pod log when SMTP isn't configured.
+  # Map env-string to a literal atom. `String.to_existing_atom/1` doesn't
+  # work here in a release: runtime.exs runs before the application that
+  # owns these atoms has loaded, so the atoms aren't in the table yet.
   smtp_tri = fn var, default ->
     case System.get_env(var, default) do
-      v when v in ~w(always if_available never) -> String.to_existing_atom(v)
+      "always" -> :always
+      "if_available" -> :if_available
+      "never" -> :never
       other -> raise "#{var} must be one of always|if_available|never, got: #{inspect(other)}"
     end
   end
@@ -137,7 +142,8 @@ if config_env() == :prod do
 
   smtp_verify =
     case System.get_env("SMTP_TLS_VERIFY", "verify_peer") do
-      v when v in ~w(verify_peer verify_none) -> String.to_existing_atom(v)
+      "verify_peer" -> :verify_peer
+      "verify_none" -> :verify_none
       other -> raise "SMTP_TLS_VERIFY must be verify_peer or verify_none, got: #{inspect(other)}"
     end
 

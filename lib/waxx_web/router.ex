@@ -134,6 +134,20 @@ defmodule WaxxWeb.Router do
       post "/cards/:card_id/notes", NoteController, :create
       patch "/notes/:id", NoteController, :update
       delete "/notes/:id", NoteController, :delete
+
+      patch "/boards/:id", BoardController, :update
+      delete "/boards/:id", BoardController, :delete
+
+      put "/boards/:board_id/memberships/:user_id", MembershipController, :update
+      delete "/boards/:board_id/memberships/:user_id", MembershipController, :delete
+
+      get "/boards/:board_id/invites", BoardInviteController, :index
+      post "/boards/:board_id/invites", BoardInviteController, :create
+      delete "/boards/:board_id/invites/:id", BoardInviteController, :delete
+
+      get "/users/invites", AppInviteController, :index
+      post "/users/invites", AppInviteController, :create
+      delete "/users/invites/:id", AppInviteController, :delete
     end
   end
 end

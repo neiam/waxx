@@ -77,10 +77,40 @@ defmodule WaxxWeb.Api.V1.BoardController do
     end
   end
 
+  def update(conn, %{"id" => id} = params) do
+    user = conn.assigns.current_scope.user
+
+    with {:ok, board} <- fetch_owner_board(id, user),
+         attrs <-
+           Map.take(params, ["name", "description", "archive_terminal_after_days"]),
+         {:ok, updated} <- Kanban.update_board(board, attrs) do
+      role = Kanban.role_for(updated.id, user)
+      members = Kanban.list_members(updated.id)
+      json(conn, BoardJSON.board(updated, role, members))
+    end
+  end
+
+  def delete(conn, %{"id" => id}) do
+    user = conn.assigns.current_scope.user
+
+    with {:ok, board} <- fetch_owner_board(id, user),
+         {:ok, _} <- Kanban.delete_board(board) do
+      send_resp(conn, :no_content, "")
+    end
+  end
+
   defp fetch_board(id, user) do
     case Kanban.get_board_for_user(id, user) do
       nil -> {:error, :not_found}
       board -> {:ok, Repo.preload(board, [])}
+    end
+  end
+
+  defp fetch_owner_board(id, user) do
+    with {:ok, board} <- fetch_board(id, user) do
+      if Kanban.can_manage?(Kanban.role_for(board.id, user)),
+        do: {:ok, board},
+        else: {:error, :forbidden}
     end
   end
 

@@ -155,6 +155,65 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
 
   def note_response(%CardNote{} = n), do: %{note: note(n)}
 
+  ## Members + invites --------------------------------------------------
+
+  def members_list(memberships) when is_list(memberships) do
+    %{memberships: Enum.map(memberships, &membership/1)}
+  end
+
+  def membership_response(%Membership{} = m), do: %{membership: membership(m)}
+
+  def board_invites_list(invites, base_url) when is_list(invites) do
+    %{invites: Enum.map(invites, &board_invite(&1, base_url))}
+  end
+
+  def board_invite_response(invite, base_url) do
+    %{invite: board_invite(invite, base_url)}
+  end
+
+  defp board_invite(invite, base_url) do
+    %{
+      id: invite.id,
+      token: invite.token,
+      role: invite.role,
+      note: invite.note,
+      expires_at: invite.expires_at,
+      consumed_at: invite.consumed_at,
+      inserted_at: invite.inserted_at,
+      redemption_url: "#{base_url}/b/#{invite.token}",
+      consumed_by_email:
+        case Map.get(invite, :consumed_by) do
+          %{email: email} -> email
+          _ -> nil
+        end
+    }
+  end
+
+  def app_invites_list(invites, base_url) when is_list(invites) do
+    %{invites: Enum.map(invites, &app_invite(&1, base_url))}
+  end
+
+  def app_invite_response(invite, base_url) do
+    %{invite: app_invite(invite, base_url)}
+  end
+
+  defp app_invite(invite, base_url) do
+    %{
+      id: invite.id,
+      token: invite.token,
+      note: invite.note,
+      expires_at: invite.expires_at,
+      consumed_at: invite.consumed_at,
+      inserted_at: invite.inserted_at,
+      redemption_url: "#{base_url}/users/register?invite=#{invite.token}",
+      consumed_by_email:
+        case Map.get(invite, :consumed_by) do
+          %{email: email} -> email
+          _ -> nil
+        end
+    }
+  end
+
   def card(%Card{} = c) do
     %{
       id: c.id,
