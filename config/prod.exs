@@ -7,17 +7,17 @@ import Config
 # before starting your production server.
 config :waxx, WaxxWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
-# Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
-config :waxx, WaxxWeb.Endpoint,
-  force_ssl: [
-    rewrite_on: [:x_forwarded_proto],
-    exclude: [
-      # paths: ["/health"],
-      hosts: ["localhost", "127.0.0.1"]
-    ]
-  ]
+# SSL is terminated at the Traefik edge (see app.yml — the
+# `redirect-https` middleware bounces http→https there). Phoenix never
+# sees TLS directly: requests arrive on the pod as plaintext with
+# `X-Forwarded-Proto: https`. We deliberately do NOT install
+# `force_ssl` here — when it ran, any request whose X-Forwarded-Proto
+# header didn't make it through ended up 301'd to https by Phoenix,
+# which then broke WebSocket upgrades (the channels client can't
+# follow redirects on /socket/websocket).
+#
+# To re-enable HSTS without the redirect, add `:put_secure_browser_headers`
+# adjustments to the router pipeline instead.
 
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
