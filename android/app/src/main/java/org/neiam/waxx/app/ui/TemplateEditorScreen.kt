@@ -335,20 +335,21 @@ private fun TransitionRow(
 
 @Composable
 private fun StagePicker(stages: List<Stage>, selected: String?, onPick: (String) -> Unit) {
-    LazyColumn(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 2.dp)) {
-        items(stages.sortedBy { it.position }, key = { it.id }) { s ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onPick(s.id) }
-                    .padding(vertical = 4.dp),
-            ) {
-                FilterChip(
-                    selected = s.id == selected,
-                    onClick = { onPick(s.id) },
-                    label = { Text(s.name) },
-                )
-            }
+    // Plain Column (not LazyColumn) — nesting a LazyColumn inside another
+    // LazyColumn's item slot crashes with "Vertically scrollable component
+    // was measured with an infinity maximum height constraints" at
+    // runtime. Stage lists are tiny (a handful per template) so eager
+    // layout is fine.
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        stages.sortedBy { it.position }.forEach { s ->
+            FilterChip(
+                selected = s.id == selected,
+                onClick = { onPick(s.id) },
+                label = { Text(s.name) },
+            )
         }
     }
 }
