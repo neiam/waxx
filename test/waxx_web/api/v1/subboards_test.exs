@@ -71,6 +71,41 @@ defmodule WaxxWeb.Api.V1.SubboardsTest do
     end
   end
 
+  describe "PATCH /api/v1/subboards/:id reorder" do
+    test "owner can change position", %{conn: conn} do
+      %{token: token, board: board} = setup_owner()
+      {:ok, a} = Kanban.create_subboard(board, %{"name" => "A"})
+      {:ok, b} = Kanban.create_subboard(board, %{"name" => "B"})
+      {:ok, c} = Kanban.create_subboard(board, %{"name" => "C"})
+
+      assert [first0, second0, third0] = Kanban.list_subboards(board)
+      assert first0.id == a.id
+      assert second0.id == b.id
+      assert third0.id == c.id
+
+      conn = conn |> auth(token) |> patch(~p"/api/v1/subboards/#{a.id}", %{position: 2})
+      assert %{"subboard" => sb} = json_response(conn, 200)
+      assert sb["position"] == 2
+
+      [first, second, third] = Kanban.list_subboards(board)
+      assert first.id == b.id
+      assert second.id == c.id
+      assert third.id == a.id
+    end
+
+    test "non-owner gets 403", %{conn: conn} do
+      owner = confirmed_user_fixture()
+      editor = confirmed_user_fixture()
+      board = board_fixture(owner)
+      {:ok, _} = Kanban.add_member(board, editor, "editor")
+      {:ok, sb} = Kanban.create_subboard(board, %{"name" => "X"})
+      token = api_token_fixture(editor)
+
+      conn = conn |> auth(token) |> patch(~p"/api/v1/subboards/#{sb.id}", %{position: 0})
+      assert json_response(conn, 403)
+    end
+  end
+
   describe "POST /api/v1/cards/:id/move with subboard_id" do
     test "moves the card to the target subboard", %{conn: conn} do
       %{token: token, board: board, user: user} = setup_owner()

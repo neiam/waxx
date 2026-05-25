@@ -1,3 +1,6 @@
+stages:
+  - build
+
 build-master:
   retry: 1
   stage: build
@@ -9,3 +12,31 @@ build-master:
   script:
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
     - /kaniko/executor --force --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $CI_REGISTRY_IMAGE --registry-mirror us0.regi.kube.gmp.io
+
+# Android debug build. Runs only when /android/** changes so the kaniko
+# job above doesn't drag this in for every backend tweak. Uses a community
+# image with the SDK pre-installed; if you want to pin a specific SDK
+# version, swap the image and set `accept-android-licenses` accordingly.
+android-debug:
+  stage: build
+  image: cimg/android:2024.07.1
+  rules:
+    - changes:
+        - android/**/*
+        - .gitlab-ci.yml
+  variables:
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.parallel=true"
+  cache:
+    key: android-gradle-$CI_COMMIT_REF_SLUG
+    paths:
+      - .gradle/
+      - android/.gradle/
+  before_script:
+    - cd android
+    - chmod +x gradlew
+  script:
+    - ./gradlew --no-daemon :app:assembleDebug
+  artifacts:
+    paths:
+      - android/app/build/outputs/apk/debug/app-debug.apk
+    expire_in: 1 week

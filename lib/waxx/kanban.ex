@@ -527,6 +527,54 @@ defmodule Waxx.Kanban do
   end
 
   @doc """
+  Moves a subboard to a new 0-based row position. Shifts the other
+  subboards on the same board to fill / make room. Broadcasts
+  `:workflow_changed` so open kanban views re-render the grid.
+
+  No-op if the target index is the current position or out of range.
+  """
+  def reorder_subboard(%Subboard{board_id: board_id} = sb, new_index)
+      when is_integer(new_index) and new_index >= 0 do
+    rows =
+      Repo.all(
+        from(s in Subboard,
+          where: s.board_id == ^board_id,
+          order_by: [asc: s.position, asc: s.inserted_at]
+        )
+      )
+
+    clamped = min(new_index, length(rows) - 1)
+    current = Enum.find_index(rows, &(&1.id == sb.id))
+
+    cond do
+      current == nil ->
+        {:error, :not_found}
+
+      current == clamped ->
+        {:ok, sb}
+
+      true ->
+        rest = List.delete_at(rows, current)
+        reordered = List.insert_at(rest, clamped, sb)
+
+        Repo.transact(fn ->
+          Enum.with_index(reordered)
+          |> Enum.each(fn {row, idx} ->
+            Repo.update_all(
+              from(s in Subboard, where: s.id == ^row.id),
+              set: [position: idx]
+            )
+          end)
+
+          {:ok, :reordered}
+        end)
+
+        broadcast_workflow_changed(board_id)
+        {:ok, Repo.get!(Subboard, sb.id)}
+    end
+  end
+
+  @doc """
   Deletes a subboard. Cards previously assigned to it fall back to the
   default row (FK is `on_delete: :nilify_all`). Broadcasts.
   """

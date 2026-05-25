@@ -115,6 +115,7 @@ defmodule WaxxWeb.Router do
       get "/users/me", UserController, :me
 
       get "/boards", BoardController, :index
+      post "/boards", BoardController, :create
       get "/boards/:id", BoardController, :show
       get "/boards/:board_id/workflow", BoardController, :workflow
       get "/boards/:board_id/cards", BoardController, :cards
@@ -150,7 +151,29 @@ defmodule WaxxWeb.Router do
       delete "/users/invites/:id", AppInviteController, :delete
 
       post "/boards/:board_id/subboards", SubboardController, :create
+      patch "/subboards/:id", SubboardController, :update
       delete "/subboards/:id", SubboardController, :delete
+
+      # Workflow templates ---------------------------------------------
+      get "/workflow_templates", TemplateController, :index
+      post "/workflow_templates", TemplateController, :create
+      get "/workflow_templates/:id", TemplateController, :show
+      patch "/workflow_templates/:id", TemplateController, :update
+      delete "/workflow_templates/:id", TemplateController, :delete
+
+      post "/workflow_templates/:template_id/stages", TemplateController, :add_stage
+      patch "/template_stages/:id", TemplateController, :update_stage
+      delete "/template_stages/:id", TemplateController, :delete_stage
+
+      post "/workflow_templates/:template_id/transitions", TemplateController, :add_transition
+      delete "/template_transitions/:id", TemplateController, :delete_transition
+
+      post "/workflow_templates/:template_id/labels", TemplateController, :add_label
+      delete "/template_labels/:id", TemplateController, :delete_label
+
+      post "/workflow_templates/:template_id/fields", TemplateController, :add_field
+      patch "/template_fields/:id", TemplateController, :update_field
+      delete "/template_fields/:id", TemplateController, :delete_field
     end
   end
 end

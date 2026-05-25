@@ -877,22 +877,94 @@ keeps the daily-driver pieces.)*
 - `BoardsListScreen` top-right icon changed to a `MoreVert` overflow
   menu hosting "Registration invites" + "Sign out".
 
-### Phase 5b — Deferred
-- **Template editor** — three-tab editor (workflow / labels / fields)
-  is a substantial chunk; mobile usage is rare (most users set up once
-  on the web). Endpoints still needed: template CRUD + stages /
-  transitions / labels / fields CRUD.
-- **User preferences sync** — `PATCH /api/v1/users/me/preferences`
-  for theme + per-board label-text toggle. Low priority until the
-  Android client itself has a theme picker.
-- **Default invite role / note suggestions** — sensible defaults
-  when generating invites (currently the form is bare).
+### Phase 5b — Template editor ✅ shipped
+- `WaxxWeb.Api.V1.TemplateController` covers template CRUD + nested
+  stage/transition/label/field CRUD. All authenticated users can
+  read/write (matches the LiveView surface at `/workflow-templates`).
+- `POST /api/v1/boards` `{template_id, name, ...}` clones a template
+  the same way the LiveView creator does.
+- Each mutation cascades to existing boards via the existing
+  `Waxx.Workflows.*` propagation logic.
+- Android: `TemplatesListScreen` (reached from BoardsListScreen
+  overflow) + `TemplateEditorScreen` with three tabs (Workflow /
+  Labels / Fields). BoardsListScreen gains a FAB + `CreateBoardDialog`
+  for spinning up boards from templates without going to the web.
+- 8 new controller tests; backend at **154** total.
 
-### Phase 6 — Subboards & polish
-- Move endpoint already covers `subboard_id`; add UI for the 2-D grid
-  view.
-- Polish: empty states, error retry UX, accessibility audit, in-app
-  theme picker, push-notification scaffolding (deferred but stubbed).
+### Polish shipped alongside Phase 5b
+- **Force-disconnect on token revocation** — `Accounts.delete_api_token/2`
+  broadcasts `"disconnect"` on the user's socket topic; the revoked
+  device's reconnect 401s, other devices reconnect cleanly.
+- **Subboard reordering** — `Kanban.reorder_subboard/2`,
+  `PATCH /api/v1/subboards/:id {position}`; Android Rows tab has
+  up/down arrows.
+- **Within-column DnD reorder** — `DragState.dropAt` returns a
+  `Drop(target, index?)`; same-cell drops compute insertion index
+  from chips' vertical centers. Server's existing `move_card/4`
+  `target_index` handled it.
+- **Auto-scroll during drag** — Kanban `LaunchedEffect` watches the
+  drag pointer; `animateScrollBy` runs while the pointer sits within
+  80dp of either horizontal edge.
+- **GitLab CI** — new `android-debug` job runs `:app:assembleDebug`
+  on changes under `/android/**`, uses `cimg/android:2024.07.1`,
+  caches the gradle directory, publishes the debug APK as an artifact.
+
+### Still deferred
+- **User preferences sync** — `PATCH /api/v1/users/me/preferences`
+  for theme + per-board label-text toggle. Theme picker uses local
+  storage today.
+- **Default invite role / note suggestions** — bare form today.
+- **Per-token socket id** (so revoking one token only takes down
+  *that* connection, not all the user's sockets). Acceptable as-is.
+
+### Phase 6 — Subboards (2-D grid) ✅ shipped
+- `POST /api/v1/cards/:id/move` now accepts an optional `subboard_id`
+  in the body; the server distinguishes "absent" (leave the row alone)
+  from "null" (clear to default row) via `Map.has_key?`. After the
+  stage move succeeds, `Kanban.set_card_subboard/3` runs in the same
+  request — same serial pattern the LiveView uses.
+- New `WaxxWeb.Api.V1.SubboardController`:
+  - `POST   /api/v1/boards/:board_id/subboards`   `{name}`
+  - `DELETE /api/v1/subboards/:id`
+  Owner-only. Cards previously assigned fall back to the default row
+  via the FK's `on_delete: :nilify_all`.
+- `BoardJSON.subboard_response/1` returns the `{subboard: …}` envelope.
+- Foreign-board subboard ids on a move are rejected as `422
+  invalid_subboard` — `Kanban.set_card_subboard/3` already enforces
+  this, the API just surfaces it.
+- 7 new controller tests; backend now at **141** total.
+
+- Android wire-format: `MoveCardBody` stays for stage-only moves;
+  a parallel `moveCardWithSubboard` extension uses a sealed
+  `SubboardChange` (`Leave | Clear | Set(id)`) plus a free-form
+  `JsonObject` body to control which fields actually appear on the
+  wire — `kotlinx.serialization` defaults can't distinguish "absent
+  field" from "null field" otherwise.
+- `DragState` reworked to track cells by `(stageId, subboardId?)`
+  instead of just stageId. Same shape covers 1-D (subboardId = null
+  everywhere) and 2-D layouts.
+- `BoardScreen` Kanban dispatches:
+  - **1-D** (no subboards): existing horizontal Row of stage columns.
+  - **2-D** (subboards present): vertical Column of subboard rows
+    (Default first, then sorted subboards), each a horizontal Row of
+    stage cells. A header strip across the top labels the columns.
+- DnD across the 2-D grid uses `moveCardWithSubboard`. Dropping in
+  `(target_stage, target_subboard)` moves stage and re-assigns row
+  in one call; same-row drops omit `subboard_id` to leave it alone.
+- `CardSheet` got a new "Row" section above Labels: a row of
+  `FilterChip`s for `Default` + every subboard. Selecting one calls
+  the same move endpoint (with the current stage_id) to re-assign.
+- `BoardSettingsScreen` got a fourth tab — **Rows** — with a
+  Compose form to add a row (name) and a list to delete existing ones.
+  Owner-only.
+
+### Phase 6 remainder — deferred (optional polish)
+- **Within-column reorder via DnD** (still deferred from Phase 4c).
+- **Auto-scroll during drag** for wide boards.
+- **Reorder subboard rows** — Kanban context has `position` but no
+  helper to swap; LiveView doesn't expose it either. Wait for ask.
+- **Empty-state polish** / error retry UX / accessibility audit /
+  in-app theme picker / push notifications. Out of scope for parity.
 
 ---
 

@@ -27,6 +27,14 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
     Subboard
   }
 
+  alias Waxx.Workflows.{
+    Template,
+    Stage,
+    Transition,
+    TemplateLabel,
+    TemplateField
+  }
+
   ## Boards --------------------------------------------------------------
 
   def boards_list(boards_with_roles) when is_list(boards_with_roles) do
@@ -198,6 +206,96 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
   def app_invite_response(invite, base_url) do
     %{invite: app_invite(invite, base_url)}
   end
+
+  ## Templates ----------------------------------------------------------
+
+  def templates_list(templates) when is_list(templates) do
+    %{templates: Enum.map(templates, &template_summary/1)}
+  end
+
+  defp template_summary(%Template{} = t) do
+    %{
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      created_by_id: t.created_by_id,
+      inserted_at: t.inserted_at,
+      updated_at: t.updated_at
+    }
+  end
+
+  def template_response(%Template{} = t) do
+    %{template: template_with_graph(t)}
+  end
+
+  defp template_with_graph(%Template{} = t) do
+    template_summary(t)
+    |> Map.merge(%{
+      stages: render_template_stages(t),
+      transitions: render_template_transitions(t),
+      labels: render_template_labels(t),
+      fields: render_template_fields(t)
+    })
+  end
+
+  defp render_template_stages(%Template{stages: %Ecto.Association.NotLoaded{}}), do: []
+
+  defp render_template_stages(%Template{stages: stages}),
+    do: stages |> Enum.sort_by(& &1.position) |> Enum.map(&template_stage/1)
+
+  defp render_template_transitions(%Template{transitions: %Ecto.Association.NotLoaded{}}), do: []
+
+  defp render_template_transitions(%Template{transitions: ts}),
+    do: Enum.map(ts, &template_transition/1)
+
+  defp render_template_labels(%Template{labels: %Ecto.Association.NotLoaded{}}), do: []
+
+  defp render_template_labels(%Template{labels: ls}),
+    do: ls |> Enum.sort_by(& &1.name) |> Enum.map(&template_label/1)
+
+  defp render_template_fields(%Template{fields: %Ecto.Association.NotLoaded{}}), do: []
+
+  defp render_template_fields(%Template{fields: fs}),
+    do: fs |> Enum.sort_by(& &1.position) |> Enum.map(&template_field/1)
+
+  def template_stage(%Stage{} = s) do
+    %{id: s.id, name: s.name, position: s.position, color: s.color}
+  end
+
+  def template_stage_response(%Stage{} = s), do: %{stage: template_stage(s)}
+
+  def template_transition(%Transition{} = t) do
+    %{
+      id: t.id,
+      from_stage_id: t.from_stage_id,
+      to_stage_id: t.to_stage_id,
+      label: t.label
+    }
+  end
+
+  def template_transition_response(%Transition{} = t),
+    do: %{transition: template_transition(t)}
+
+  def template_label(%TemplateLabel{} = l) do
+    %{id: l.id, name: l.name, color: l.color}
+  end
+
+  def template_label_response(%TemplateLabel{} = l), do: %{label: template_label(l)}
+
+  def template_field(%TemplateField{} = f) do
+    %{
+      id: f.id,
+      name: f.name,
+      kind: f.kind,
+      options: f.options || [],
+      show_on_card: f.show_on_card,
+      position: f.position
+    }
+  end
+
+  def template_field_response(%TemplateField{} = f), do: %{field: template_field(f)}
+
+  ## App invites --------------------------------------------------------
 
   defp app_invite(invite, base_url) do
     %{

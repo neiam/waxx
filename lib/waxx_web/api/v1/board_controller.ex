@@ -21,8 +21,9 @@ defmodule WaxxWeb.Api.V1.BoardController do
 
   use WaxxWeb, :controller
 
-  alias Waxx.Kanban
+  alias Waxx.{Kanban, Workflows}
   alias Waxx.Repo
+  alias Waxx.Workflows.Template
   alias WaxxWeb.Api.V1.BoardJSON
 
   action_fallback WaxxWeb.Api.FallbackController
@@ -77,6 +78,23 @@ defmodule WaxxWeb.Api.V1.BoardController do
     end
   end
 
+  def create(conn, params) do
+    user = conn.assigns.current_scope.user
+
+    with {:ok, template_id} <- fetch_str(params, "template_id"),
+         %Template{} = template <-
+           Workflows.get_template(template_id) || {:error, :not_found},
+         attrs <- Map.take(params, ["name", "description", "archive_terminal_after_days"]),
+         {:ok, board} <- Kanban.create_board_from_template(user, template, attrs) do
+      role = Kanban.role_for(board.id, user)
+      members = Kanban.list_members(board.id)
+
+      conn
+      |> put_status(:created)
+      |> json(BoardJSON.board(board, role, members))
+    end
+  end
+
   def update(conn, %{"id" => id} = params) do
     user = conn.assigns.current_scope.user
 
@@ -124,4 +142,11 @@ defmodule WaxxWeb.Api.V1.BoardController do
   end
 
   defp parse_limit(_), do: 200
+
+  defp fetch_str(params, key) do
+    case Map.get(params, key) do
+      v when is_binary(v) and v != "" -> {:ok, v}
+      _ -> {:error, :validation_failed}
+    end
+  end
 end

@@ -382,7 +382,17 @@ defmodule Waxx.Accounts do
     |> Repo.all()
   end
 
-  @doc "Revokes a single API token by id, scoped to its owner."
+  @doc """
+  Revokes a single API token by id, scoped to its owner.
+
+  Also broadcasts a `"disconnect"` event on the user's socket topic
+  (`"user_socket:<user_id>"`) so any live Phoenix channel connections
+  for this user are immediately torn down. The revoked token's
+  subsequent reconnect attempt 401s; the user's *other* devices simply
+  reconnect with their still-valid tokens. Brief disruption is the
+  trade-off for not threading per-token socket ids through the whole
+  socket lifecycle.
+  """
   def delete_api_token(%User{id: user_id}, token_id) do
     {count, _} =
       Repo.delete_all(
@@ -391,7 +401,12 @@ defmodule Waxx.Accounts do
         )
       )
 
-    if count == 1, do: :ok, else: {:error, :not_found}
+    if count == 1 do
+      WaxxWeb.Endpoint.broadcast("user_socket:#{user_id}", "disconnect", %{})
+      :ok
+    else
+      {:error, :not_found}
+    end
   end
 
   ## Token helper

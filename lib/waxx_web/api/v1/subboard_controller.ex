@@ -42,6 +42,31 @@ defmodule WaxxWeb.Api.V1.SubboardController do
     end
   end
 
+  def update(conn, %{"id" => id} = params) do
+    user = conn.assigns.current_scope.user
+
+    with %Subboard{board_id: board_id} = sb <-
+           Repo.get(Subboard, id) || {:error, :not_found},
+         {:ok, _board} <- fetch_owner_board(board_id, user),
+         {:ok, position} <- require_position(params),
+         {:ok, moved} <- Kanban.reorder_subboard(sb, position) do
+      json(conn, BoardJSON.subboard_response(moved))
+    else
+      {:error, _} = err -> err
+    end
+  end
+
+  defp require_position(%{"position" => p}) when is_integer(p) and p >= 0, do: {:ok, p}
+
+  defp require_position(%{"position" => p}) when is_binary(p) do
+    case Integer.parse(p) do
+      {n, _} when n >= 0 -> {:ok, n}
+      _ -> {:error, :validation_failed}
+    end
+  end
+
+  defp require_position(_), do: {:error, :validation_failed}
+
   defp fetch_owner_board(board_id, user) do
     case Kanban.get_board_for_user(board_id, user) do
       nil ->

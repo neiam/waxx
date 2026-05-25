@@ -44,4 +44,19 @@ defmodule WaxxWeb.BoardChannelTest do
     assert_push("cards_changed", %{board_id: board_id})
     assert board_id == board.id
   end
+
+  test "revoking an api token broadcasts a 'disconnect' on the user_socket" do
+    user = confirmed_user_fixture()
+    token = api_token_fixture(user)
+    {:ok, socket} = connect(UserSocket, %{"token" => token})
+
+    # Subscribe the test process to the user's socket topic so we can
+    # observe the disconnect broadcast.
+    WaxxWeb.Endpoint.subscribe("user_socket:" <> socket.assigns.user_id)
+
+    [%{id: token_id}] = Waxx.Accounts.list_api_tokens(user)
+    :ok = Waxx.Accounts.delete_api_token(user, token_id)
+
+    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+  end
 end
