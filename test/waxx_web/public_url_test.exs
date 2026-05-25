@@ -36,6 +36,22 @@ defmodule WaxxWeb.PublicUrlTest do
       assert PublicUrl.derive(conn) == "https://proxy.example.com"
     end
 
+    test "X-Forwarded-Proto alone upgrades the scheme; host comes from conn" do
+      conn =
+        build_conn(host: "waxx.neiam.co", scheme: :http, port: 80)
+        |> Plug.Conn.put_req_header("x-forwarded-proto", "https")
+
+      assert PublicUrl.derive(conn) == "https://waxx.neiam.co"
+    end
+
+    test "X-Forwarded-Host alone keeps conn scheme; host from header" do
+      conn =
+        build_conn(host: "internal", scheme: :https, port: 443)
+        |> Plug.Conn.put_req_header("x-forwarded-host", "edge.example.com")
+
+      assert PublicUrl.derive(conn) == "https://edge.example.com"
+    end
+
     test "X-Forwarded-Proto with comma-separated values picks the first" do
       conn =
         build_conn(host: "internal.example.com", scheme: :http, port: 80)

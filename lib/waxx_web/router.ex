@@ -148,6 +148,9 @@ defmodule WaxxWeb.Router do
       get "/users/invites", AppInviteController, :index
       post "/users/invites", AppInviteController, :create
       delete "/users/invites/:id", AppInviteController, :delete
+
+      post "/boards/:board_id/subboards", SubboardController, :create
+      delete "/subboards/:id", SubboardController, :delete
     end
   end
 end

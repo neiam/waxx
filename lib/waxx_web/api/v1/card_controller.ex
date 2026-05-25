@@ -20,7 +20,7 @@ defmodule WaxxWeb.Api.V1.CardController do
   use WaxxWeb, :controller
 
   alias Waxx.{Accounts, Kanban, Repo}
-  alias Waxx.Kanban.{BoardField, BoardLabel, Card}
+  alias Waxx.Kanban.{BoardField, BoardLabel, Card, Subboard}
   alias WaxxWeb.Api.V1.BoardJSON
 
   action_fallback WaxxWeb.Api.FallbackController
@@ -75,13 +75,39 @@ defmodule WaxxWeb.Api.V1.CardController do
          {:ok, target_stage_id} <- require_param(params, "board_stage_id") do
       target_index = parse_position(params["position"])
 
-      case Kanban.move_card(card, target_stage_id, target_index, actor: user) do
-        {:ok, moved} ->
-          json(conn, BoardJSON.card_response(reload_card(moved)))
+      with {:ok, moved} <- Kanban.move_card(card, target_stage_id, target_index, actor: user),
+           {:ok, final} <- apply_subboard_change(moved, params, user) do
+        json(conn, BoardJSON.card_response(reload_card(final)))
+      else
+        {:error, reason}
+        when reason in [:invalid_transition, :invalid_stage, :invalid_subboard] ->
+          {:error, reason}
 
-        {:error, reason} when reason in [:invalid_transition, :invalid_stage] ->
+        {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  # Optional second leg of a move: re-assign the card's subboard. Omitting
+  # the key leaves it alone; `null` clears it to the default row.
+  defp apply_subboard_change(card, params, user) do
+    if Map.has_key?(params, "subboard_id") do
+      case params["subboard_id"] do
+        nil ->
+          Kanban.set_card_subboard(card, nil, actor: user)
+
+        id when is_binary(id) ->
+          case Repo.get(Subboard, id) do
+            nil -> {:error, :not_found}
+            %Subboard{} = sb -> Kanban.set_card_subboard(card, sb, actor: user)
+          end
+
+        _ ->
+          {:error, :validation_failed}
+      end
+    else
+      {:ok, card}
     end
   end
 

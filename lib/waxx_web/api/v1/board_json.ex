@@ -119,6 +119,8 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
     %{id: sb.id, name: sb.name, position: sb.position}
   end
 
+  def subboard_response(%Subboard{} = sb), do: %{subboard: subboard(sb)}
+
   ## Cards ---------------------------------------------------------------
 
   def cards(cards) when is_list(cards) do
