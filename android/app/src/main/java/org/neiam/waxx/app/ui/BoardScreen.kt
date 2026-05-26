@@ -410,16 +410,32 @@ private fun Kanban(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Column header
+            // Column header — each stage label sits in a tinted box
+            // matching its stage color so the grid header reads like the
+            // 1-D cell headers below.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(modifier = Modifier.width(120.dp))
                 sortedStages.forEach { stage ->
-                    Text(
-                        stage.name,
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.width(240.dp).padding(horizontal = 4.dp),
-                    )
+                    val tint = parseStageColor(stage.color)
+                    Box(
+                        modifier = Modifier
+                            .width(240.dp)
+                            .then(
+                                if (tint != null) {
+                                    Modifier.background(
+                                        tint.copy(alpha = 0.35f),
+                                        RoundedCornerShape(6.dp),
+                                    )
+                                } else Modifier,
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            stage.name,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
                 }
             }
             rows.forEach { sb ->
@@ -491,12 +507,26 @@ private fun StageCell(
                 ),
         ) {
             if (showStageLabel) {
-                Text(
-                    stage.name,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
+                val tint = parseStageColor(stage.color)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (tint != null) {
+                                Modifier.background(
+                                    tint.copy(alpha = 0.35f),
+                                    RoundedCornerShape(6.dp),
+                                )
+                            } else Modifier,
+                        )
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        stage.name,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
             }
             Text(
                 "${cards.size} card${if (cards.size == 1) "" else "s"}",

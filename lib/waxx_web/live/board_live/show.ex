@@ -35,7 +35,8 @@ defmodule WaxxWeb.BoardLive.Show do
          |> assign(:card_edit_form, nil)
          |> assign(:hide_label_text, Accounts.hide_label_text?(user, board_id))
          |> assign(:card_templates, Kanban.list_card_templates(board))
-         |> assign(:new_card_form, to_form(%{"title" => "", "description" => ""}, as: "card"))}
+         |> assign(:new_card_form, to_form(%{"title" => "", "description" => ""}, as: "card"))
+         |> assign(:note_stage_picker_open_for, nil)}
     end
   end
 
@@ -413,7 +414,7 @@ defmodule WaxxWeb.BoardLive.Show do
     end)
   end
 
-  def handle_event("add_note", %{"id" => card_id, "body" => body, "kind" => kind}, socket) do
+  def handle_event("add_note", %{"id" => card_id} = params, socket) do
     guard_edit(socket, fn ->
       card = Kanban.get_card(card_id)
       user = socket.assigns.current_scope.user
@@ -423,7 +424,26 @@ defmodule WaxxWeb.BoardLive.Show do
           {:noreply, put_flash(socket, :error, "Card not found.")}
 
         true ->
-          case Kanban.add_card_note(card, user, %{"body" => body, "kind" => kind}) do
+          attrs = %{
+            "body" => params["body"],
+            "kind" => params["kind"]
+          }
+
+          # Optional stage override. Must belong to this card's board —
+          # the LiveView form only ever offers stages from `@board.stages`,
+          # but defence-in-depth.
+          attrs =
+            case params["board_stage_id"] do
+              s when is_binary(s) and s != "" ->
+                if Enum.any?(socket.assigns.board.stages, &(&1.id == s)),
+                  do: Map.put(attrs, "board_stage_id", s),
+                  else: attrs
+
+              _ ->
+                attrs
+            end
+
+          case Kanban.add_card_note(card, user, attrs) do
             {:ok, _} -> {:noreply, socket}
             {:error, _} -> {:noreply, put_flash(socket, :error, "Couldn't add the note.")}
           end
@@ -453,6 +473,30 @@ defmodule WaxxWeb.BoardLive.Show do
         note ->
           {:ok, _} = Kanban.delete_card_note(note)
           {:noreply, socket}
+      end
+    end)
+  end
+
+  # Click on a note's stage label toggles a per-note inline picker.
+  # Re-clicking the same note (or another) closes / re-opens accordingly.
+  def handle_event("toggle_note_stage_picker", %{"id" => id}, socket) do
+    current = socket.assigns.note_stage_picker_open_for
+    next = if current == id, do: nil, else: id
+    {:noreply, assign(socket, :note_stage_picker_open_for, next)}
+  end
+
+  def handle_event("set_note_stage", %{"id" => id, "stage-id" => stage_id}, socket) do
+    guard_edit(socket, fn ->
+      with %{} = note <- find_note_on_open_card(socket, id),
+           true <- Enum.any?(socket.assigns.board.stages, &(&1.id == stage_id)),
+           {:ok, _} <- Kanban.update_card_note(note, %{board_stage_id: stage_id}) do
+        {:noreply, assign(socket, :note_stage_picker_open_for, nil)}
+      else
+        _ ->
+          {:noreply,
+           socket
+           |> assign(:note_stage_picker_open_for, nil)
+           |> put_flash(:error, "Couldn't reassign the note.")}
       end
     end)
   end
@@ -671,6 +715,7 @@ defmodule WaxxWeb.BoardLive.Show do
           targets={Kanban.allowed_targets(@expanded_card)}
           editing={@editing_card}
           edit_form={@card_edit_form}
+          note_stage_picker_open_for={@note_stage_picker_open_for}
         />
       <% end %>
 
@@ -983,6 +1028,7 @@ defmodule WaxxWeb.BoardLive.Show do
   attr :targets, :list, required: true
   attr :editing, :boolean, default: false
   attr :edit_form, :any, default: nil
+  attr :note_stage_picker_open_for, :any, default: nil
 
   defp card_detail(assigns) do
     ~H"""
@@ -1181,8 +1227,8 @@ defmodule WaxxWeb.BoardLive.Show do
           <li
             :for={n <- @card.notes}
             id={"note-#{n.id}"}
-            class="flex items-start gap-2 border-l-2 pl-2 py-1"
-            style={"border-color: #{note_stage_color(n, @board) || "transparent"}"}
+            class="flex items-start gap-2 rounded px-2 py-1"
+            style={"background-color: #{note_stage_color_bg(n, @board)}"}
           >
             <%= if n.kind == "todo" do %>
               <input
@@ -1203,9 +1249,39 @@ defmodule WaxxWeb.BoardLive.Show do
               ]}>
                 {n.body}
               </p>
-              <p class="text-[10px] opacity-60 mt-0.5">
-                {note_stage_name(n, @board)}
-              </p>
+              <%= if Kanban.can_edit?(@role) do %>
+                <button
+                  type="button"
+                  phx-click="toggle_note_stage_picker"
+                  phx-value-id={n.id}
+                  class="text-[10px] opacity-60 mt-0.5 hover:opacity-100 hover:underline cursor-pointer"
+                  title="Click to reassign stage"
+                >
+                  {note_stage_name(n, @board)}
+                </button>
+                <div
+                  :if={@note_stage_picker_open_for == n.id}
+                  class="flex flex-wrap gap-1 mt-1"
+                >
+                  <button
+                    :for={s <- @board.stages}
+                    type="button"
+                    phx-click="set_note_stage"
+                    phx-value-id={n.id}
+                    phx-value-stage-id={s.id}
+                    class={[
+                      "btn btn-xs btn-outline",
+                      s.id == n.board_stage_id and "btn-active"
+                    ]}
+                  >
+                    {s.name}
+                  </button>
+                </div>
+              <% else %>
+                <p class="text-[10px] opacity-60 mt-0.5">
+                  {note_stage_name(n, @board)}
+                </p>
+              <% end %>
             </div>
             <button
               :if={Kanban.can_edit?(@role)}
@@ -1226,20 +1302,30 @@ defmodule WaxxWeb.BoardLive.Show do
           as={:note}
           phx-submit="add_note"
           phx-value-id={@card.id}
-          class="flex items-end gap-2"
+          class="flex flex-col gap-2"
         >
-          <input
-            type="text"
-            name="body"
-            placeholder="Write a note or todo…"
-            required
-            class="input input-sm input-bordered flex-1"
-          />
-          <select name="kind" class="select select-sm select-bordered">
-            <option value="note">Note</option>
-            <option value="todo">Todo</option>
-          </select>
-          <.button class="btn btn-primary btn-sm">Add</.button>
+          <div class="flex items-end gap-2">
+            <input
+              type="text"
+              name="body"
+              placeholder="Write a note or todo…"
+              required
+              class="input input-sm input-bordered flex-1"
+            />
+            <select name="kind" class="select select-sm select-bordered">
+              <option value="note">Note</option>
+              <option value="todo">Todo</option>
+            </select>
+            <.button class="btn btn-primary btn-sm">Add</.button>
+          </div>
+          <label class="text-xs opacity-70 flex items-center gap-2">
+            Log against
+            <select name="board_stage_id" class="select select-xs select-bordered">
+              <option :for={s <- @board.stages} value={s.id} selected={s.id == @card.board_stage_id}>
+                {s.name}
+              </option>
+            </select>
+          </label>
         </.form>
       </div>
 
@@ -1338,6 +1424,35 @@ defmodule WaxxWeb.BoardLive.Show do
       _ -> nil
     end
   end
+
+  # Background tint for a note row. Returns "transparent" when there's no
+  # stage color; otherwise an rgba(...) with the stage hue at low alpha
+  # so body text stays readable. Matches the Android card sheet's
+  # whole-row tint (see ui/CardSheet.kt's `NoteRow`).
+  defp note_stage_color_bg(note, board) do
+    case note_stage_color(note, board) do
+      nil -> "transparent"
+      hex -> hex_to_rgba(hex, 0.18) || "transparent"
+    end
+  end
+
+  defp hex_to_rgba("#" <> rest, alpha), do: hex_to_rgba(rest, alpha)
+
+  defp hex_to_rgba(<<r1, r2, g1, g2, b1, b2>>, alpha) do
+    with {r, ""} <- Integer.parse(<<r1, r2>>, 16),
+         {g, ""} <- Integer.parse(<<g1, g2>>, 16),
+         {b, ""} <- Integer.parse(<<b1, b2>>, 16) do
+      "rgba(#{r}, #{g}, #{b}, #{alpha})"
+    else
+      _ -> nil
+    end
+  end
+
+  defp hex_to_rgba(<<r, g, b>>, alpha) do
+    hex_to_rgba(<<r, r, g, g, b, b>>, alpha)
+  end
+
+  defp hex_to_rgba(_, _), do: nil
 
   defp note_stage_name(%{board_stage_id: nil}, _board), do: "(no stage)"
 

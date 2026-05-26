@@ -228,10 +228,19 @@ data class CardNote(
 data class NoteResponse(val note: CardNote)
 
 @Serializable
-data class CreateNoteBody(val body: String, val kind: String? = null)
+data class CreateNoteBody(
+    val body: String,
+    val kind: String? = null,
+    val board_stage_id: String? = null,
+)
 
 @Serializable
-data class UpdateNoteBody(val body: String? = null, val done: Boolean? = null)
+data class UpdateNoteBody(
+    val body: String? = null,
+    val done: Boolean? = null,
+    val kind: String? = null,
+    val board_stage_id: String? = null,
+)
 
 @Serializable
 data class SetFieldBody(val value: String? = null)

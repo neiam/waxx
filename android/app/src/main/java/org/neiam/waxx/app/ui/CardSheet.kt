@@ -1,5 +1,6 @@
 package org.neiam.waxx.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -317,12 +318,21 @@ fun CardSheet(
                 items(notes.sortedBy { it.position }, key = { it.id }) { n ->
                     NoteRow(
                         note = n,
+                        stages = workflow?.stages.orEmpty(),
                         enabled = creds != null && !busy,
                         onToggleDone = {
                             mutate {
                                 WaxxClient.authenticated(creds!!).updateNote(
                                     noteId = n.id,
                                     body = UpdateNoteBody(done = !n.done),
+                                )
+                            }
+                        },
+                        onPickStage = { stageId ->
+                            mutate {
+                                WaxxClient.authenticated(creds!!).updateNote(
+                                    noteId = n.id,
+                                    body = UpdateNoteBody(board_stage_id = stageId),
                                 )
                             }
                         },
@@ -335,12 +345,18 @@ fun CardSheet(
                 }
                 item {
                     AddNoteRow(
+                        stages = workflow?.stages.orEmpty(),
+                        currentStageId = stageId,
                         enabled = creds != null && !busy,
-                        onAdd = { body, kind ->
+                        onAdd = { body, kind, stageIdForNote ->
                             mutate {
                                 WaxxClient.authenticated(creds!!).createNote(
                                     cardId = initialCard.id,
-                                    body = CreateNoteBody(body = body, kind = kind),
+                                    body = CreateNoteBody(
+                                        body = body,
+                                        kind = kind,
+                                        board_stage_id = stageIdForNote,
+                                    ),
                                 )
                             }
                         },
@@ -483,39 +499,87 @@ private fun FieldRow(
 @Composable
 private fun NoteRow(
     note: org.neiam.waxx.app.data.CardNote,
+    stages: List<org.neiam.waxx.app.data.Stage>,
     enabled: Boolean,
     onToggleDone: () -> Unit,
+    onPickStage: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    var menuOpen by remember { mutableStateOf(false) }
+    val stage = stages.firstOrNull { it.id == note.board_stage_id }
+    val tint = parseStageColor(stage?.color)
+        ?: MaterialTheme.colorScheme.surfaceVariant
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .background(tint.copy(alpha = 0.35f), shape)
+            .padding(8.dp),
     ) {
-        if (note.kind == "todo") {
-            Checkbox(
-                checked = note.done,
-                enabled = enabled,
-                onCheckedChange = { onToggleDone() },
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (note.kind == "todo") {
+                Checkbox(
+                    checked = note.done,
+                    enabled = enabled,
+                    onCheckedChange = { onToggleDone() },
+                )
+            } else {
+                Box(modifier = Modifier.width(40.dp).height(20.dp))
+            }
+            Text(
+                note.body,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
             )
-        } else {
-            Box(modifier = Modifier.width(40.dp).height(20.dp))
+            if (enabled) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete note")
+                }
+            }
         }
-        Text(note.body, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        if (enabled) {
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete note")
+        // Stage label + tap-to-reassign. The whole row already shows the
+        // stage color; this just labels which stage it is and exposes the
+        // picker.
+        Row(modifier = Modifier.padding(start = 48.dp)) {
+            Box {
+                androidx.compose.material3.AssistChip(
+                    enabled = enabled && stages.isNotEmpty(),
+                    onClick = { menuOpen = true },
+                    label = { Text(stage?.name ?: "—") },
+                )
+                androidx.compose.material3.DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                ) {
+                    stages.sortedBy { it.position }.forEach { s ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(s.name) },
+                            onClick = {
+                                menuOpen = false
+                                if (s.id != note.board_stage_id) onPickStage(s.id)
+                            },
+                        )
+                    }
+                }
             }
         }
     }
 }
 
+// parseStageColor moved to ui/StageColor.kt — also used by BoardScreen.
+
 @Composable
 private fun AddNoteRow(
+    stages: List<org.neiam.waxx.app.data.Stage>,
+    currentStageId: String,
     enabled: Boolean,
-    onAdd: (body: String, kind: String?) -> Unit,
+    onAdd: (body: String, kind: String?, stageId: String?) -> Unit,
 ) {
     var body by remember { mutableStateOf("") }
     var asTodo by remember { mutableStateOf(false) }
+    var stageId by remember(currentStageId) { mutableStateOf(currentStageId) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         OutlinedTextField(
@@ -525,6 +589,28 @@ private fun AddNoteRow(
             modifier = Modifier.fillMaxWidth(),
             singleLine = false,
         )
+        // Stage picker — defaults to the card's current stage but lets
+        // the user log against any stage on the board.
+        if (stages.isNotEmpty()) {
+            Text(
+                "Log against",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                stages.sortedBy { it.position }.forEach { s ->
+                    FilterChip(
+                        selected = s.id == stageId,
+                        onClick = { stageId = s.id },
+                        label = { Text(s.name) },
+                    )
+                }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -543,7 +629,11 @@ private fun AddNoteRow(
                 onClick = {
                     val text = body.trim()
                     body = ""
-                    onAdd(text, if (asTodo) "todo" else null)
+                    // Omit the stage param when the user kept the default
+                    // (card's current stage) — the server already does
+                    // that when board_stage_id is absent.
+                    val explicit = if (stageId != currentStageId) stageId else null
+                    onAdd(text, if (asTodo) "todo" else null, explicit)
                 },
             ) {
                 Icon(Icons.Default.Add, contentDescription = null); Text(" Add")

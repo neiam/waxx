@@ -225,5 +225,57 @@ defmodule WaxxWeb.Api.V1.CardRelationsTest do
 
       assert json_response(conn, 403)
     end
+
+    test "create accepts an explicit board_stage_id on the same board", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+      [_todo, done] = board.stages
+
+      conn =
+        conn
+        |> auth(token)
+        |> post(~p"/api/v1/cards/#{card.id}/notes", %{
+          body: "log this against Done",
+          board_stage_id: done.id
+        })
+
+      assert %{"note" => n} = json_response(conn, 201)
+      assert n["board_stage_id"] == done.id
+    end
+
+    test "create rejects a stage from a different board", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+
+      other_owner = confirmed_user_fixture()
+      other_board = board_fixture(other_owner)
+      [foreign_stage, _] = other_board.stages
+
+      conn =
+        conn
+        |> auth(token)
+        |> post(~p"/api/v1/cards/#{card.id}/notes", %{
+          body: "should fail",
+          board_stage_id: foreign_stage.id
+        })
+
+      assert json_response(conn, 422)["error"]["code"] == "validation_failed"
+    end
+
+    test "update can re-assign the stage", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+      [todo, done] = board.stages
+      {:ok, note} = Kanban.add_card_note(card, user, %{"body" => "x"})
+      assert note.board_stage_id == todo.id
+
+      conn =
+        conn
+        |> auth(token)
+        |> patch(~p"/api/v1/notes/#{note.id}", %{board_stage_id: done.id})
+
+      assert %{"note" => n} = json_response(conn, 200)
+      assert n["board_stage_id"] == done.id
+    end
   end
 end
