@@ -38,16 +38,35 @@ defmodule WaxxWeb.Api.V1.BoardLabelsTest do
       assert Repo.get_by(BoardLabel, board_id: board.id, name: "urgent")
     end
 
-    test "duplicate name on the same board is a 422", %{conn: conn} do
+    test "re-adding an existing name updates its color in place (200)", %{conn: conn} do
       %{token: token, board: board} = setup_owner()
-      board_label_fixture(board, name: "urgent")
+      existing = board_label_fixture(board, name: "urgent", color: "#000000")
 
       conn =
         conn
         |> auth(token)
-        |> post(~p"/api/v1/boards/#{board.id}/labels", %{name: "urgent"})
+        |> post(~p"/api/v1/boards/#{board.id}/labels", %{name: "urgent", color: "#ff0000"})
 
-      assert json_response(conn, 422)["error"]["code"] == "validation_failed"
+      assert %{"label" => label} = json_response(conn, 200)
+      assert label["id"] == existing.id
+      assert label["color"] == "#ff0000"
+      assert Repo.get(BoardLabel, existing.id).color == "#ff0000"
+    end
+
+    test "can scope a label to subboards", %{conn: conn} do
+      %{token: token, board: board} = setup_owner()
+      {:ok, sb} = Kanban.create_subboard(board, %{"name" => "Alpha"})
+
+      conn =
+        conn
+        |> auth(token)
+        |> post(~p"/api/v1/boards/#{board.id}/labels", %{
+          name: "alpha-only",
+          subboard_ids: [sb.id]
+        })
+
+      assert %{"label" => label} = json_response(conn, 201)
+      assert label["subboard_ids"] == [sb.id]
     end
 
     test "non-owner gets 403", %{conn: conn} do

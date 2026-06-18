@@ -109,8 +109,15 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
   end
 
   defp label(%BoardLabel{} = l) do
-    %{id: l.id, name: l.name, color: l.color}
+    %{id: l.id, name: l.name, color: l.color, subboard_ids: label_subboard_ids(l)}
   end
+
+  # Board-wide labels report `[]`. Falls back to `[]` when the association
+  # wasn't preloaded so the field is always present and well-typed.
+  defp label_subboard_ids(%BoardLabel{subboards: subboards}) when is_list(subboards),
+    do: Enum.map(subboards, & &1.id)
+
+  defp label_subboard_ids(_), do: []
 
   defp field(%BoardField{} = f) do
     %{

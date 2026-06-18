@@ -135,12 +135,14 @@ defmodule WaxxWeb.BoardLive.Settings do
   def handle_event("create_label", %{"label" => params}, socket) do
     if Kanban.can_manage?(socket.assigns.role) do
       case Kanban.create_board_label(socket.assigns.board, params) do
-        {:ok, _} ->
+        {:ok, tag, _} ->
+          flash = if tag == :updated, do: "Label updated.", else: "Label added."
+
           {:noreply,
            socket
            |> assign(:labels, Kanban.list_board_labels(socket.assigns.board))
            |> assign(:label_form, blank_label_form())
-           |> put_flash(:info, "Label added.")}
+           |> put_flash(:info, flash)}
 
         {:error, cs} ->
           {:noreply, put_flash(socket, :error, "Could not add label: #{format_errors(cs)}")}
@@ -166,7 +168,11 @@ defmodule WaxxWeb.BoardLive.Settings do
 
         {:error, :in_use} ->
           {:noreply,
-           put_flash(socket, :error, "That label is still attached to cards — remove it there first.")}
+           put_flash(
+             socket,
+             :error,
+             "That label is still attached to cards — remove it there first."
+           )}
 
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Could not delete label.")}
@@ -214,7 +220,7 @@ defmodule WaxxWeb.BoardLive.Settings do
   end
 
   defp blank_label_form do
-    to_form(%{"name" => "", "color" => ""}, as: "label")
+    to_form(%{"name" => "", "color" => "", "subboard_ids" => []}, as: "label")
   end
 
   defp format_errors(%Ecto.Changeset{errors: errors}) do
@@ -389,6 +395,13 @@ defmodule WaxxWeb.BoardLive.Settings do
                 style={"background: #{lab.color}"}
               />
               <span class="text-sm">{lab.name}</span>
+              <span
+                :if={lab.subboards != []}
+                class="text-[10px] opacity-60"
+                title="Only applies to cards in these subboards"
+              >
+                {Enum.map_join(lab.subboards, ", ", & &1.name)}
+              </span>
               <button
                 :if={Kanban.can_manage?(@role)}
                 type="button"
@@ -415,6 +428,23 @@ defmodule WaxxWeb.BoardLive.Settings do
               <.button class="btn btn-primary">Add label</.button>
             </div>
             <.color_picker field={@label_form[:color]} label="Color (optional)" />
+
+            <fieldset :if={@subboards != []} class="flex flex-col gap-1">
+              <legend class="text-xs opacity-70 mb-1">
+                Limit to subboards (optional — leave all unchecked for a board-wide label)
+              </legend>
+              <%!-- Hidden entry keeps the key present so unchecking all clears the scope. --%>
+              <input type="hidden" name="label[subboard_ids][]" value="" />
+              <label :for={sb <- @subboards} class="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="label[subboard_ids][]"
+                  value={sb.id}
+                  class="checkbox checkbox-sm"
+                />
+                {sb.name}
+              </label>
+            </fieldset>
           </.form>
         </section>
 

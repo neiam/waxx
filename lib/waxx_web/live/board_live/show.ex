@@ -537,7 +537,14 @@ defmodule WaxxWeb.BoardLive.Show do
       label =
         Enum.find(socket.assigns.board.labels, &(&1.id == label_id_int))
 
-      if card && card.board_id == socket.assigns.board.id && label do
+      # Only allow applying a label that's in scope for the card's subboard;
+      # a label already on the card stays toggleable so it can be removed.
+      in_scope? =
+        card && label &&
+          (Kanban.BoardLabel.applies_to_subboard?(label, card.subboard_id) or
+             Enum.any?(card.labels, &(&1.id == label.id)))
+
+      if card && card.board_id == socket.assigns.board.id && in_scope? do
         case Kanban.toggle_card_label(card, label, actor: socket.assigns.current_scope.user) do
           {:ok, _} ->
             {:noreply, socket}
@@ -1106,11 +1113,11 @@ defmodule WaxxWeb.BoardLive.Show do
         </div>
       </div>
 
-      <div :if={@board.labels != []} class="p-4 border-b border-base-300">
+      <div :if={labels_for_card(@board.labels, @card) != []} class="p-4 border-b border-base-300">
         <h3 class="text-xs font-semibold uppercase tracking-wider opacity-60 mb-2">Labels</h3>
         <div class="flex flex-wrap gap-1">
           <button
-            :for={lab <- @board.labels}
+            :for={lab <- labels_for_card(@board.labels, @card)}
             type="button"
             phx-click="toggle_label"
             phx-value-card-id={@card.id}
@@ -1404,6 +1411,18 @@ defmodule WaxxWeb.BoardLive.Show do
     do: "background-color: #{c}; color: #111; border-color: transparent;"
 
   defp label_style(_), do: ""
+
+  # Labels offered in a card's label picker: board-wide labels plus any
+  # scoped to the card's subboard, unioned with labels already on the card
+  # (so a label that was later scoped away can still be removed).
+  defp labels_for_card(labels, card) do
+    on_card = MapSet.new(card.labels, & &1.id)
+
+    Enum.filter(labels, fn lab ->
+      Kanban.BoardLabel.applies_to_subboard?(lab, card.subboard_id) or
+        MapSet.member?(on_card, lab.id)
+    end)
+  end
 
   # Looks up a note id against the currently-expanded card. Keeps the
   # match scoped to the card the user is actually viewing — a stray

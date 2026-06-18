@@ -3,9 +3,13 @@ defmodule WaxxWeb.Api.V1.BoardLabelController do
   Board-level label management. Owners only. Lets a board grow its own
   labels beyond the set cloned from its template.
 
-      POST   /api/v1/boards/:board_id/labels   {name, color}
-      PATCH  /api/v1/board_labels/:id          {name, color}
+      POST   /api/v1/boards/:board_id/labels   {name, color, subboard_ids}
+      PATCH  /api/v1/board_labels/:id          {name, color, subboard_ids}
       DELETE /api/v1/board_labels/:id
+
+  `subboard_ids` (optional) restricts the label to those subboards; omit or
+  pass `[]` for a board-wide label. POSTing a name that already exists on
+  the board updates that label in place (200) instead of failing.
 
   Deletion is refused (422 `in_use`) while any card still wears the
   label — same rule as template-label removal propagation.
@@ -23,10 +27,10 @@ defmodule WaxxWeb.Api.V1.BoardLabelController do
     user = conn.assigns.current_scope.user
 
     with {:ok, board} <- fetch_owner_board(board_id, user),
-         attrs <- Map.take(params, ["name", "color"]),
-         {:ok, label} <- Kanban.create_board_label(board, attrs) do
+         attrs <- Map.take(params, ["name", "color", "subboard_ids"]),
+         {:ok, tag, label} <- Kanban.create_board_label(board, attrs) do
       conn
-      |> put_status(:created)
+      |> put_status(if(tag == :created, do: :created, else: :ok))
       |> json(BoardJSON.board_label_response(label))
     end
   end
@@ -37,7 +41,7 @@ defmodule WaxxWeb.Api.V1.BoardLabelController do
     with %BoardLabel{board_id: board_id} = label <-
            Repo.get(BoardLabel, id) || {:error, :not_found},
          {:ok, _board} <- fetch_owner_board(board_id, user),
-         attrs <- Map.take(params, ["name", "color"]),
+         attrs <- Map.take(params, ["name", "color", "subboard_ids"]),
          {:ok, updated} <- Kanban.update_board_label(label, attrs) do
       json(conn, BoardJSON.board_label_response(updated))
     else

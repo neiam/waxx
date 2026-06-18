@@ -641,9 +641,15 @@ defmodule Waxx.Kanban do
 
   ## Board labels --------------------------------------------------------
 
-  @doc "Lists a board's labels alphabetically."
+  @doc "Lists a board's labels alphabetically, with their subboard scope preloaded."
   def list_board_labels(%Board{id: board_id}) do
-    Repo.all(from(l in BoardLabel, where: l.board_id == ^board_id, order_by: [asc: l.name]))
+    Repo.all(
+      from(l in BoardLabel,
+        where: l.board_id == ^board_id,
+        order_by: [asc: l.name],
+        preload: [:subboards]
+      )
+    )
   end
 
   @doc """
@@ -651,28 +657,47 @@ defmodule Waxx.Kanban do
   (boards own their label list and may drift from the template they were
   cloned from). Broadcasts `:workflow_changed` so open kanban views
   refresh their chips.
+
+  `attrs` may carry `subboard_ids` to restrict the label to one or more of
+  the board's subboards (omit or pass an empty list for a board-wide label).
+
+  Re-adding a label whose name already exists on the board is treated as an
+  edit: its color and subboard scope are updated in place rather than
+  failing the unique constraint. Returns `{:ok, :created | :updated, label}`
+  on success, or `{:error, changeset}`.
   """
   def create_board_label(%Board{} = board, attrs) do
-    attrs =
-      attrs
-      |> stringify_keys()
-      |> Map.put("board_id", board.id)
+    attrs = stringify_keys(attrs)
+    name = attrs["name"]
 
-    case %BoardLabel{} |> BoardLabel.changeset(attrs) |> Repo.insert() do
-      {:ok, _} = result ->
-        broadcast_workflow_changed(board.id)
-        result
+    case name && Repo.get_by(BoardLabel, board_id: board.id, name: name) do
+      %BoardLabel{} = existing ->
+        existing
+        |> Repo.preload(:subboards)
+        |> build_board_label_changeset(board, attrs)
+        |> Repo.update()
+        |> tag_board_label_result(board.id, :updated)
 
-      other ->
-        other
+      _ ->
+        %BoardLabel{}
+        |> build_board_label_changeset(board, attrs)
+        |> Repo.insert()
+        |> tag_board_label_result(board.id, :created)
     end
   end
 
-  @doc "Renames/recolors a board label. Broadcasts on success."
+  @doc """
+  Renames/recolors a board label and, when `subboard_ids` is present in
+  `attrs`, replaces its subboard scope. Broadcasts on success.
+  """
   def update_board_label(%BoardLabel{} = label, attrs) do
     attrs = attrs |> stringify_keys() |> Map.delete("board_id")
+    board = %Board{id: label.board_id}
 
-    case label |> BoardLabel.changeset(attrs) |> Repo.update() do
+    case label
+         |> Repo.preload(:subboards)
+         |> build_board_label_changeset(board, attrs)
+         |> Repo.update() do
       {:ok, _} = result ->
         broadcast_workflow_changed(label.board_id)
         result
@@ -681,6 +706,38 @@ defmodule Waxx.Kanban do
         other
     end
   end
+
+  # Builds a BoardLabel changeset, pinning board_id and (only when
+  # `subboard_ids` was supplied) replacing the subboard scope via put_assoc.
+  defp build_board_label_changeset(label, %Board{} = board, attrs) do
+    changeset =
+      label
+      |> BoardLabel.changeset(Map.put(attrs, "board_id", board.id))
+
+    case Map.fetch(attrs, "subboard_ids") do
+      {:ok, ids} -> Ecto.Changeset.put_assoc(changeset, :subboards, scoped_subboards(board, ids))
+      :error -> changeset
+    end
+  end
+
+  # Resolves submitted subboard ids to the board's own Subboard rows,
+  # dropping blanks and anything that doesn't belong to this board.
+  defp scoped_subboards(%Board{id: board_id}, ids) do
+    ids = ids |> List.wrap() |> Enum.reject(&(&1 in [nil, ""]))
+
+    if ids == [] do
+      []
+    else
+      Repo.all(from(s in Subboard, where: s.board_id == ^board_id and s.id in ^ids))
+    end
+  end
+
+  defp tag_board_label_result({:ok, label}, board_id, tag) do
+    broadcast_workflow_changed(board_id)
+    {:ok, tag, label}
+  end
+
+  defp tag_board_label_result(other, _board_id, _tag), do: other
 
   @doc """
   Deletes a board label. Refuses with `{:error, :in_use}` while any card
@@ -711,7 +768,7 @@ defmodule Waxx.Kanban do
     Repo.preload(board,
       stages: from(s in BoardStage, order_by: [asc: s.position]),
       transitions: [:from_stage, :to_stage],
-      labels: from(l in BoardLabel, order_by: [asc: l.name]),
+      labels: {from(l in BoardLabel, order_by: [asc: l.name]), [:subboards]},
       fields: from(f in BoardField, order_by: [asc: f.position, asc: f.id]),
       subboards: from(sb in Subboard, order_by: [asc: sb.position, asc: sb.inserted_at]),
       memberships: [:user]

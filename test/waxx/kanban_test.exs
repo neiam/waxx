@@ -479,6 +479,60 @@ defmodule Waxx.KanbanTest do
     end
   end
 
+  describe "board labels: scope + upsert" do
+    setup do
+      user = AccountsFixtures.user_fixture()
+      template = build_template_with_two_stages_and_transition(user)
+      {:ok, board} = Kanban.create_board_from_template(user, template, %{"name" => "B"})
+      %{user: user, board: board}
+    end
+
+    test "create returns :created and defaults to board-wide (no subboards)", %{board: board} do
+      assert {:ok, :created, label} = Kanban.create_board_label(board, %{"name" => "wip"})
+      assert Waxx.Kanban.BoardLabel.applies_to_subboard?(Repo.preload(label, :subboards), nil)
+    end
+
+    test "re-adding the same name updates color + scope in place (:updated)", %{board: board} do
+      {:ok, sb} = Kanban.create_subboard(board, %{"name" => "Alpha"})
+
+      {:ok, :created, label} =
+        Kanban.create_board_label(board, %{"name" => "wip", "color" => "#000000"})
+
+      assert {:ok, :updated, updated} =
+               Kanban.create_board_label(board, %{
+                 "name" => "wip",
+                 "color" => "#ffffff",
+                 "subboard_ids" => [sb.id]
+               })
+
+      assert updated.id == label.id
+      assert updated.color == "#ffffff"
+      assert Enum.map(Repo.preload(updated, :subboards).subboards, & &1.id) == [sb.id]
+    end
+
+    test "a scoped label only applies inside its subboards", %{board: board} do
+      {:ok, sb} = Kanban.create_subboard(board, %{"name" => "Alpha"})
+
+      {:ok, :created, label} =
+        Kanban.create_board_label(board, %{"name" => "alpha-only", "subboard_ids" => [sb.id]})
+
+      label = Repo.preload(label, :subboards)
+      assert Waxx.Kanban.BoardLabel.applies_to_subboard?(label, sb.id)
+      refute Waxx.Kanban.BoardLabel.applies_to_subboard?(label, nil)
+    end
+
+    test "foreign subboard ids are ignored when scoping", %{user: user, board: board} do
+      other_template = build_template_with_two_stages_and_transition(user)
+      {:ok, other} = Kanban.create_board_from_template(user, other_template, %{"name" => "O"})
+      {:ok, foreign_sb} = Kanban.create_subboard(other, %{"name" => "Nope"})
+
+      {:ok, :created, label} =
+        Kanban.create_board_label(board, %{"name" => "x", "subboard_ids" => [foreign_sb.id]})
+
+      assert Repo.preload(label, :subboards).subboards == []
+    end
+  end
+
   describe "template → board propagation" do
     test "renaming a template stage renames the matching board stage" do
       user = AccountsFixtures.user_fixture()
