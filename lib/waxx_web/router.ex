@@ -154,6 +154,10 @@ defmodule WaxxWeb.Router do
       patch "/subboards/:id", SubboardController, :update
       delete "/subboards/:id", SubboardController, :delete
 
+      post "/boards/:board_id/labels", BoardLabelController, :create
+      patch "/board_labels/:id", BoardLabelController, :update
+      delete "/board_labels/:id", BoardLabelController, :delete
+
       # Workflow templates ---------------------------------------------
       get "/workflow_templates", TemplateController, :index
       post "/workflow_templates", TemplateController, :create

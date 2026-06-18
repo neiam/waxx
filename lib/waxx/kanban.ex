@@ -639,6 +639,71 @@ defmodule Waxx.Kanban do
     Repo.one(from(sb in Subboard, where: sb.id == ^subboard_id, select: sb.name)) || "Default"
   end
 
+  ## Board labels --------------------------------------------------------
+
+  @doc "Lists a board's labels alphabetically."
+  def list_board_labels(%Board{id: board_id}) do
+    Repo.all(from(l in BoardLabel, where: l.board_id == ^board_id, order_by: [asc: l.name]))
+  end
+
+  @doc """
+  Adds a label directly to a board, independent of the board's template
+  (boards own their label list and may drift from the template they were
+  cloned from). Broadcasts `:workflow_changed` so open kanban views
+  refresh their chips.
+  """
+  def create_board_label(%Board{} = board, attrs) do
+    attrs =
+      attrs
+      |> stringify_keys()
+      |> Map.put("board_id", board.id)
+
+    case %BoardLabel{} |> BoardLabel.changeset(attrs) |> Repo.insert() do
+      {:ok, _} = result ->
+        broadcast_workflow_changed(board.id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  @doc "Renames/recolors a board label. Broadcasts on success."
+  def update_board_label(%BoardLabel{} = label, attrs) do
+    attrs = attrs |> stringify_keys() |> Map.delete("board_id")
+
+    case label |> BoardLabel.changeset(attrs) |> Repo.update() do
+      {:ok, _} = result ->
+        broadcast_workflow_changed(label.board_id)
+        result
+
+      other ->
+        other
+    end
+  end
+
+  @doc """
+  Deletes a board label. Refuses with `{:error, :in_use}` while any card
+  still references it (same rule the template-removal propagation
+  enforces). Broadcasts on success.
+  """
+  def delete_board_label(%BoardLabel{} = label) do
+    in_use? = Repo.exists?(from(cl in CardLabel, where: cl.board_label_id == ^label.id))
+
+    if in_use? do
+      {:error, :in_use}
+    else
+      case Repo.delete(label) do
+        {:ok, _} = result ->
+          broadcast_workflow_changed(label.board_id)
+          result
+
+        other ->
+          other
+      end
+    end
+  end
+
   @doc "Board with workflow graph, labels, custom fields, and members preloaded."
   def get_board_with_workflow!(board_id, %User{} = user) do
     board = get_board_for_user(board_id, user) || raise Ecto.NoResultsError, queryable: Board

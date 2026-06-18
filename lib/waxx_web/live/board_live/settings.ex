@@ -29,6 +29,8 @@ defmodule WaxxWeb.BoardLive.Settings do
           |> assign(:board_form, to_form(Kanban.change_board(board)))
           |> assign(:subboards, Kanban.list_subboards(board))
           |> assign(:subboard_form, to_form(%{"name" => ""}, as: "subboard"))
+          |> assign(:labels, Kanban.list_board_labels(board))
+          |> assign(:label_form, blank_label_form())
 
         {:ok, socket}
     end
@@ -130,6 +132,50 @@ defmodule WaxxWeb.BoardLive.Settings do
     end
   end
 
+  def handle_event("create_label", %{"label" => params}, socket) do
+    if Kanban.can_manage?(socket.assigns.role) do
+      case Kanban.create_board_label(socket.assigns.board, params) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(:labels, Kanban.list_board_labels(socket.assigns.board))
+           |> assign(:label_form, blank_label_form())
+           |> put_flash(:info, "Label added.")}
+
+        {:error, cs} ->
+          {:noreply, put_flash(socket, :error, "Could not add label: #{format_errors(cs)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only the owner can add labels.")}
+    end
+  end
+
+  def handle_event("delete_label", %{"id" => id}, socket) do
+    if Kanban.can_manage?(socket.assigns.role) do
+      label = Enum.find(socket.assigns.labels, &(&1.id == id))
+
+      case label && Kanban.delete_board_label(label) do
+        nil ->
+          {:noreply, socket}
+
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(:labels, Kanban.list_board_labels(socket.assigns.board))
+           |> put_flash(:info, "Label deleted.")}
+
+        {:error, :in_use} ->
+          {:noreply,
+           put_flash(socket, :error, "That label is still attached to cards — remove it there first.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Could not delete label.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only the owner can delete labels.")}
+    end
+  end
+
   def handle_event("create_subboard", %{"subboard" => params}, socket) do
     if Kanban.can_manage?(socket.assigns.role) do
       case Kanban.create_subboard(socket.assigns.board, params) do
@@ -165,6 +211,14 @@ defmodule WaxxWeb.BoardLive.Settings do
     else
       {:noreply, put_flash(socket, :error, "Only the owner can delete subboards.")}
     end
+  end
+
+  defp blank_label_form do
+    to_form(%{"name" => "", "color" => ""}, as: "label")
+  end
+
+  defp format_errors(%Ecto.Changeset{errors: errors}) do
+    Enum.map_join(errors, ", ", fn {field, {msg, _}} -> "#{field} #{msg}" end)
   end
 
   @impl true
@@ -310,6 +364,58 @@ defmodule WaxxWeb.BoardLive.Settings do
               </button>
             </li>
           </ul>
+        </section>
+
+        <section>
+          <h2 class="text-lg font-semibold mb-2">Labels</h2>
+          <p class="text-sm opacity-70 mb-3">
+            Labels start as a copy of the board's template, but the board
+            owns its list — add more here without touching the template.
+            A label still attached to cards can't be deleted.
+          </p>
+
+          <ul class="flex flex-wrap gap-2 mb-3">
+            <li :if={@labels == []} class="text-sm opacity-60">
+              No labels yet.
+            </li>
+            <li
+              :for={lab <- @labels}
+              id={"board-label-#{lab.id}"}
+              class="border border-base-300 rounded-box pl-2 pr-1 py-1 bg-base-200 flex items-center gap-2"
+            >
+              <span
+                :if={lab.color && lab.color != ""}
+                class="size-3 rounded-full border border-base-content/20"
+                style={"background: #{lab.color}"}
+              />
+              <span class="text-sm">{lab.name}</span>
+              <button
+                :if={Kanban.can_manage?(@role)}
+                type="button"
+                phx-click="delete_label"
+                phx-value-id={lab.id}
+                data-confirm="Remove this label from the board?"
+                class="btn btn-ghost btn-xs text-error"
+                aria-label="Delete label"
+              >
+                <.icon name="hero-x-mark-micro" class="size-3" />
+              </button>
+            </li>
+          </ul>
+
+          <.form
+            :if={Kanban.can_manage?(@role)}
+            for={@label_form}
+            id="board-label-form"
+            phx-submit="create_label"
+            class="flex flex-col gap-3"
+          >
+            <div class="flex items-end gap-2">
+              <.input field={@label_form[:name]} type="text" label="New label name" required />
+              <.button class="btn btn-primary">Add label</.button>
+            </div>
+            <.color_picker field={@label_form[:color]} label="Color (optional)" />
+          </.form>
         </section>
 
         <section>

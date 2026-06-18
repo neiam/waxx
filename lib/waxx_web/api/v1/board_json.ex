@@ -129,6 +129,9 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
 
   def subboard_response(%Subboard{} = sb), do: %{subboard: subboard(sb)}
 
+  @doc "Single-label envelope used by the board-label mutation endpoints."
+  def board_label_response(%BoardLabel{} = l), do: %{label: label(l)}
+
   ## Cards ---------------------------------------------------------------
 
   def cards(cards) when is_list(cards) do
