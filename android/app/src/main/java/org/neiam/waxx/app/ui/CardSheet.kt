@@ -240,11 +240,17 @@ fun CardSheet(
                     }
                 }
 
-                if (labelDefs.isNotEmpty()) {
+                // Only offer labels in scope for this card's row; a label
+                // already on the card stays visible so it can be removed
+                // even after being scoped away. Mirrors the server-side rule.
+                val pickableLabels = labelDefs.filter {
+                    it.appliesTo(subboardId) || it.id in labelIds
+                }
+                if (pickableLabels.isNotEmpty()) {
                     item { SectionHeader("Labels") }
                     item {
                         FlowRowChips {
-                            labelDefs.forEach { label ->
+                            pickableLabels.forEach { label ->
                                 val selected = label.id in labelIds
                                 FilterChip(
                                     selected = selected,

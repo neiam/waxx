@@ -178,6 +178,25 @@ interface WaxxApi {
         @retrofit2.http.Path("id") id: String,
     ): retrofit2.Response<Unit>
 
+    // --- Board labels ---
+
+    @retrofit2.http.POST("api/v1/boards/{id}/labels")
+    suspend fun createBoardLabel(
+        @retrofit2.http.Path("id") boardId: String,
+        @retrofit2.http.Body body: BoardLabelBody,
+    ): BoardLabelResponse
+
+    @retrofit2.http.PATCH("api/v1/board_labels/{id}")
+    suspend fun updateBoardLabel(
+        @retrofit2.http.Path("id") id: String,
+        @retrofit2.http.Body body: BoardLabelBody,
+    ): BoardLabelResponse
+
+    @retrofit2.http.DELETE("api/v1/board_labels/{id}")
+    suspend fun deleteBoardLabel(
+        @retrofit2.http.Path("id") id: String,
+    ): retrofit2.Response<Unit>
+
     // --- Phase 6: subboards ---
 
     @retrofit2.http.POST("api/v1/boards/{id}/subboards")

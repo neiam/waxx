@@ -112,7 +112,18 @@ data class Label(
     val id: String,
     val name: String,
     val color: String? = null,
-)
+    // Subboards this label is scoped to. Empty = board-wide (applies to every
+    // card). Present on board workflows; template labels omit it (defaults []).
+    val subboard_ids: List<String> = emptyList(),
+) {
+    /**
+     * Whether this label may be applied to a card sitting in [subboardId]
+     * (null = the default row). Board-wide labels apply everywhere; scoped
+     * labels only inside their subboards. Mirrors the server-side rule.
+     */
+    fun appliesTo(subboardId: String?): Boolean =
+        subboard_ids.isEmpty() || subboardId in subboard_ids
+}
 
 @Serializable
 data class Field(
@@ -320,6 +331,18 @@ data class CreateTransitionBody(
 
 @Serializable
 data class CreateLabelBody(val name: String, val color: String? = null)
+
+// Board labels carry an optional subboard scope. Posting an existing name
+// upserts (updates color + scope) server-side rather than failing.
+@Serializable
+data class BoardLabelBody(
+    val name: String? = null,
+    val color: String? = null,
+    val subboard_ids: List<String>? = null,
+)
+
+@Serializable
+data class BoardLabelResponse(val label: Label)
 
 @Serializable
 data class CreateFieldBody(

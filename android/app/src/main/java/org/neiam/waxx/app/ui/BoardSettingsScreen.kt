@@ -1,15 +1,19 @@
 package org.neiam.waxx.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -20,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,11 +40,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,9 +55,11 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.neiam.waxx.app.data.BoardDetail
 import org.neiam.waxx.app.data.BoardInvite
+import org.neiam.waxx.app.data.BoardLabelBody
 import org.neiam.waxx.app.data.BoardMembership
 import org.neiam.waxx.app.data.CreateBoardInviteBody
 import org.neiam.waxx.app.data.CreateSubboardBody
+import org.neiam.waxx.app.data.Label
 import org.neiam.waxx.app.data.ReorderSubboardBody
 import org.neiam.waxx.app.data.Subboard
 import org.neiam.waxx.app.data.TokenStore
@@ -73,6 +83,7 @@ fun BoardSettingsScreen(
     var board by remember { mutableStateOf<BoardDetail?>(null) }
     var invites by remember { mutableStateOf<List<BoardInvite>>(emptyList()) }
     var subboards by remember { mutableStateOf<List<Subboard>>(emptyList()) }
+    var labels by remember { mutableStateOf<List<Label>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
@@ -81,8 +92,9 @@ fun BoardSettingsScreen(
         try {
             val api = WaxxClient.authenticated(creds)
             board = api.board(boardId).board
-            subboards = runCatching { api.workflow(boardId).workflow.subboards }
-                .getOrDefault(emptyList())
+            val workflow = runCatching { api.workflow(boardId).workflow }.getOrNull()
+            subboards = workflow?.subboards.orEmpty()
+            labels = workflow?.labels.orEmpty()
             invites = runCatching { api.boardInvites(boardId).invites }.getOrDefault(emptyList())
         } catch (e: Exception) {
             error = e.message
@@ -125,6 +137,7 @@ fun BoardSettingsScreen(
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Members") })
                 Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Invites") })
                 Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Rows") })
+                Tab(selected = tab == 4, onClick = { tab = 4 }, text = { Text("Labels") })
             }
 
             val isOwner = board?.role == "owner"
@@ -203,6 +216,28 @@ fun BoardSettingsScreen(
                     },
                     onDelete = { id ->
                         mutate { deleteSubboard(id) }
+                    },
+                )
+
+                4 -> LabelsTab(
+                    labels = labels,
+                    subboards = subboards,
+                    isOwner = isOwner,
+                    busy = busy,
+                    onCreate = { name, color, subboardIds ->
+                        mutate {
+                            createBoardLabel(
+                                boardId = boardId,
+                                body = BoardLabelBody(
+                                    name = name,
+                                    color = color,
+                                    subboard_ids = subboardIds,
+                                ),
+                            )
+                        }
+                    },
+                    onDelete = { id ->
+                        mutate { deleteBoardLabel(id) }
                     },
                 )
             }
@@ -421,6 +456,144 @@ private fun SubboardsTab(
             item {
                 Text(
                     "No rows yet — every card sits in the Default row.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LabelsTab(
+    labels: List<Label>,
+    subboards: List<Subboard>,
+    isOwner: Boolean,
+    busy: Boolean,
+    onCreate: (name: String, color: String?, subboardIds: List<String>) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var newName by remember { mutableStateOf("") }
+    var newColor by remember { mutableStateOf("") }
+    val selectedSubboards = remember { mutableStateListOf<String>() }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (isOwner) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Add a label", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Leave all rows unchecked for a board-wide label, or pick rows to " +
+                                "scope it to them. Re-adding an existing name updates its color and scope.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = { Text("Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = newColor,
+                            onValueChange = { newColor = it },
+                            label = { Text("Color hex (optional), e.g. #ef4444") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (subboards.isNotEmpty()) {
+                            Text(
+                                "Limit to rows",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            subboards.forEach { sb ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Checkbox(
+                                        checked = sb.id in selectedSubboards,
+                                        enabled = !busy,
+                                        onCheckedChange = { on ->
+                                            if (on) selectedSubboards.add(sb.id)
+                                            else selectedSubboards.remove(sb.id)
+                                        },
+                                    )
+                                    Text(sb.name, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                        Button(
+                            enabled = !busy && newName.isNotBlank(),
+                            onClick = {
+                                onCreate(
+                                    newName.trim(),
+                                    newColor.trim().ifBlank { null },
+                                    selectedSubboards.toList(),
+                                )
+                                newName = ""
+                                newColor = ""
+                                selectedSubboards.clear()
+                            },
+                        ) { Text("Add label") }
+                    }
+                }
+            }
+        }
+
+        items(labels, key = { it.id }) { label ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    parseStageColor(label.color)?.let { c ->
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(c),
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(label.name, style = MaterialTheme.typography.bodyMedium)
+                        val scope = if (label.subboard_ids.isEmpty()) {
+                            "All rows"
+                        } else {
+                            subboards
+                                .filter { it.id in label.subboard_ids }
+                                .joinToString { it.name }
+                                .ifBlank { "Scoped rows" }
+                        }
+                        Text(
+                            scope,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (isOwner) {
+                        OutlinedButton(enabled = !busy, onClick = { onDelete(label.id) }) {
+                            Icon(Icons.Default.Delete, contentDescription = null); Text(" Delete")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (labels.isEmpty()) {
+            item {
+                Text(
+                    "No labels yet.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

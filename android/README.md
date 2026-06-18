@@ -9,8 +9,10 @@ Every phase (0–6 plus 5b) of the rollout in [docs/android.md](../docs/android.
 is shipped: auth (QR pair + magic link), read-only boards, real-time
 updates, card writes, labels/fields/assignees/notes, drag-and-drop
 (with within-column reorder + auto-scroll), board settings + invites +
-app invites, subboards (2-D grid view with reordering), the workflow
-template editor, the 9-theme picker, and the IconKitchen launcher icon.
+app invites, subboards (2-D grid view with reordering), board-label
+management (add/recolor/delete, optionally scoped to specific rows), the
+workflow template editor, the 9-theme picker, and the IconKitchen launcher
+icon.
 
 ## Stack
 
@@ -53,7 +55,7 @@ android/
         ui/
           BoardsScreen.kt            # boards list + theme picker dropdown
           BoardScreen.kt             # kanban view (1-D or 2-D grid) + DnD + FAB
-          BoardSettingsScreen.kt     # 4-tab: Settings / Members / Invites / Rows
+          BoardSettingsScreen.kt     # 5-tab: Settings / Members / Invites / Rows / Labels
           AppInvitesScreen.kt        # registration invites
           CardSheet.kt               # bottom sheet: title/move/labels/fields/notes
           HistoryScreen.kt           # activity log
