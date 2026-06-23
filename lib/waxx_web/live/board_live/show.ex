@@ -850,8 +850,17 @@ defmodule WaxxWeb.BoardLive.Show do
               // No image bytes on the clipboard — fall back to a pasted image
               // *link* (copying an image URL yields text/plain). The server
               // fetches it, since the browser can't cross-origin.
-              const text = (e.clipboardData.getData("text/plain") || "").trim();
-              if (/^https?:\/\/\S+$/i.test(text)) {
+              //
+              // Never hijack a paste that's landing in a text field (note,
+              // description, title) — those are for typing URLs and text.
+              const t = e.target;
+              if (t && (t.isContentEditable || t.tagName === "INPUT" ||
+                        t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+
+              // Only intercept links that actually point at an image file, so
+              // pasting an ordinary link elsewhere on the card is left alone.
+              const text = ((e.clipboardData && e.clipboardData.getData("text/plain")) || "").trim();
+              if (/^https?:\/\/\S+\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)(\?\S*)?(#\S*)?$/i.test(text)) {
                 e.preventDefault();
                 this.pushEvent("set_card_background_url", { url: text });
               }
