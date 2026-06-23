@@ -72,6 +72,10 @@ defmodule WaxxWeb.Router do
       end
 
       post "/users/update-password", UserSessionController, :update_password
+
+      # Card background image bytes, referenced by board tiles + the card
+      # modal as `background-image: url(...)`. Auth inherited from the scope.
+      get "/cards/:id/background", CardBackgroundController, :show
     end
 
     scope "/", WaxxWeb do

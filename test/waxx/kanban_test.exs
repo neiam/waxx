@@ -836,6 +836,29 @@ defmodule Waxx.KanbanTest do
       assert :ok = Kanban.clear_card_background(card)
       assert Kanban.get_card(card.id).background == nil
     end
+
+    test "background_versions maps only cards that have a background", %{
+      board: board,
+      card: card,
+      user: user
+    } do
+      other = Waxx.KanbanFixtures.card_fixture(board, user)
+      assert {:ok, bg} = Kanban.set_card_background(card, @png_data_url)
+
+      versions = Kanban.background_versions(board)
+      assert versions[card.id] == DateTime.to_unix(bg.updated_at)
+      refute Map.has_key?(versions, other.id)
+    end
+
+    test "fetch_card_background_for_user enforces board access", %{card: card, user: user} do
+      assert {:ok, _} = Kanban.set_card_background(card, @png_data_url)
+
+      assert {:ok, %Waxx.Kanban.CardBackground{}} =
+               Kanban.fetch_card_background_for_user(card.id, user)
+
+      stranger = AccountsFixtures.user_fixture()
+      assert :error = Kanban.fetch_card_background_for_user(card.id, stranger)
+    end
   end
 
   ## -- helpers --------------------------------------------------------------

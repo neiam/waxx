@@ -28,6 +28,7 @@ defmodule WaxxWeb.BoardLive.Show do
          |> assign(:board, board)
          |> assign(:role, role)
          |> assign(:cards, cards)
+         |> assign(:background_versions, Kanban.background_versions(board))
          |> assign(:transitions_json, transitions_json(board))
          |> assign(:show_new_card_for, nil)
          |> assign(:expanded_card, nil)
@@ -44,7 +45,12 @@ defmodule WaxxWeb.BoardLive.Show do
   def handle_info({:cards_changed, _board_id}, socket) do
     cards = Kanban.list_cards(socket.assigns.board)
     expanded = refresh_expanded(socket)
-    {:noreply, socket |> assign(:cards, cards) |> assign(:expanded_card, expanded)}
+
+    {:noreply,
+     socket
+     |> assign(:cards, cards)
+     |> assign(:expanded_card, expanded)
+     |> assign(:background_versions, Kanban.background_versions(socket.assigns.board))}
   end
 
   # Stage/transition graph changed — typically from a template edit
@@ -62,7 +68,8 @@ defmodule WaxxWeb.BoardLive.Show do
      |> assign(:board, board)
      |> assign(:transitions_json, transitions_json(board))
      |> assign(:cards, cards)
-     |> assign(:expanded_card, expanded)}
+     |> assign(:expanded_card, expanded)
+     |> assign(:background_versions, Kanban.background_versions(board))}
   end
 
   # Pulls a fresh copy of the open card from the DB — but only when the
@@ -1095,6 +1102,7 @@ defmodule WaxxWeb.BoardLive.Show do
           data-source-stage-id={@stage.id}
           data-source-subboard-id={@subboard_id}
           class="border border-base-300 rounded-box p-2 bg-base-100 cursor-pointer hover:bg-base-200"
+          style={card_tile_bg_style(card.id, @background_versions)}
           phx-click="expand_card"
           phx-value-id={card.id}
         >
@@ -1642,6 +1650,25 @@ defmodule WaxxWeb.BoardLive.Show do
   end
 
   defp card_bg_style(_), do: nil
+
+  # Board-tile background: same blended look as the modal, but the image is
+  # referenced by URL (served lazily by CardBackgroundController) instead of
+  # inlined — the board payload never carries image bytes. `@background_versions`
+  # says which cards have one and supplies the cache-busting version. The
+  # overlay is a touch stronger than the modal's since tiles are small and dense.
+  defp card_tile_bg_style(card_id, versions) do
+    case versions do
+      %{^card_id => ver} ->
+        url = ~p"/cards/#{card_id}/background?#{%{v: ver}}"
+        overlay = "color-mix(in srgb, var(--color-base-100) 78%, transparent)"
+
+        "background-image: linear-gradient(#{overlay}, #{overlay}), url('#{url}'); " <>
+          "background-size: cover; background-position: center;"
+
+      _ ->
+        nil
+    end
+  end
 
   defp note_stage_name(%{board_stage_id: nil}, _board), do: "(no stage)"
 

@@ -1010,6 +1010,46 @@ defmodule Waxx.Kanban do
     :ok
   end
 
+  @doc """
+  Map of `card_id => version` for the board's cards that have a background
+  image, where `version` is the background's `updated_at` as a unix
+  timestamp. Used to flag which tiles get a background and to cache-bust the
+  image URL when it changes. Cheap — selects ids/timestamps only, no bytes.
+  """
+  def background_versions(%Board{id: board_id}) do
+    from(b in CardBackground,
+      join: c in Card,
+      on: c.id == b.card_id,
+      where: c.board_id == ^board_id,
+      select: {b.card_id, b.updated_at}
+    )
+    |> Repo.all()
+    |> Map.new(fn {id, updated_at} -> {id, DateTime.to_unix(updated_at)} end)
+  end
+
+  @doc """
+  Loads a card's background bytes for serving, but only if `user` can see the
+  card's board. Returns `{:ok, %CardBackground{}}` or `:error`. The bytes are
+  fetched here (not on the board list) so they travel only when actually served.
+  """
+  def fetch_card_background_for_user(card_id, %User{} = user) do
+    query =
+      from(b in CardBackground,
+        join: c in Card,
+        on: c.id == b.card_id,
+        where: b.card_id == ^card_id,
+        select: {c.board_id, b}
+      )
+
+    case Repo.one(query) do
+      {board_id, %CardBackground{} = bg} ->
+        if role_for(board_id, user), do: {:ok, bg}, else: :error
+
+      _ ->
+        :error
+    end
+  end
+
   # Splits a `data:<content-type>;base64,<payload>` URL into its content type
   # and decoded bytes. Anything malformed is rejected as `:invalid_image`.
   defp decode_data_url("data:" <> rest) do
