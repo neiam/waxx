@@ -145,6 +145,30 @@ defmodule WaxxWeb.Api.V1.CardControllerTest do
     end
   end
 
+  describe "GET /api/v1/cards/:id" do
+    # 1x1 transparent PNG.
+    @png_data_url "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+    test "detail payload carries a background once one is set", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+
+      # No background yet.
+      conn1 = conn |> auth(token) |> get(~p"/api/v1/cards/#{card.id}")
+      assert json_response(conn1, 200)["card"]["background"] == nil
+
+      {:ok, _} = Kanban.set_card_background(card, @png_data_url)
+
+      conn2 = build_conn() |> auth(token) |> get(~p"/api/v1/cards/#{card.id}")
+
+      assert %{"content_type" => "image/png", "data" => data} =
+               json_response(conn2, 200)["card"]["background"]
+
+      # Round-trips as decodable base64.
+      assert {:ok, _bytes} = Base.decode64(data)
+    end
+  end
+
   describe "DELETE /api/v1/cards/:id" do
     test "deletes the card", %{conn: conn} do
       %{token: token, board: board, user: user} = setup_owner()

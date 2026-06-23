@@ -32,6 +32,7 @@ defmodule Waxx.Kanban do
     CardLabel,
     CardFieldValue,
     CardNote,
+    CardBackground,
     CardTemplate
   }
 
@@ -934,12 +935,78 @@ defmodule Waxx.Kanban do
           :field_values,
           :notes,
           :created_by,
-          :board_stage
+          :board_stage,
+          :background
         ])
     end
   end
 
   def change_card(%Card{} = card, attrs \\ %{}), do: Card.changeset(card, attrs)
+
+  @doc """
+  Sets (or replaces) a card's pasted background image from a `data:` URL
+  like `data:image/png;base64,iVBORw0KGgo...`. Decodes the payload, enforces
+  the allowed content types and size cap, and upserts the single per-card
+  row. Returns `{:ok, background}` or `{:error, reason}`.
+  """
+  def set_card_background(%Card{} = card, data_url, opts \\ []) when is_binary(data_url) do
+    with {:ok, content_type, bytes} <- decode_data_url(data_url) do
+      result =
+        %CardBackground{}
+        |> CardBackground.changeset(%{
+          card_id: card.id,
+          content_type: content_type,
+          image_data: bytes
+        })
+        |> Repo.insert(
+          on_conflict: {:replace, [:content_type, :image_data, :updated_at]},
+          conflict_target: :card_id
+        )
+
+      with {:ok, _bg} <- result do
+        log(card.board_id, opts[:actor], "card_updated",
+          card_id: card.id,
+          meta: %{changes: ["background"], title: card.title}
+        )
+
+        # Repaints the card for every viewer who has it open — `:cards_changed`
+        # re-fetches the expanded card (and its newly-set background).
+        broadcast_cards_changed(card.board_id)
+      end
+
+      result
+    end
+  end
+
+  @doc "Removes a card's background image, if any. Always returns `:ok`."
+  def clear_card_background(%Card{} = card, opts \\ []) do
+    {count, _} = Repo.delete_all(from(b in CardBackground, where: b.card_id == ^card.id))
+
+    if count > 0 do
+      log(card.board_id, opts[:actor], "card_updated",
+        card_id: card.id,
+        meta: %{changes: ["background"], title: card.title}
+      )
+
+      broadcast_cards_changed(card.board_id)
+    end
+
+    :ok
+  end
+
+  # Splits a `data:<content-type>;base64,<payload>` URL into its content type
+  # and decoded bytes. Anything malformed is rejected as `:invalid_image`.
+  defp decode_data_url("data:" <> rest) do
+    with [meta, b64] <- String.split(rest, ",", parts: 2),
+         [content_type | _] <- String.split(meta, ";"),
+         {:ok, bytes} <- Base.decode64(b64) do
+      {:ok, content_type, bytes}
+    else
+      _ -> {:error, :invalid_image}
+    end
+  end
+
+  defp decode_data_url(_), do: {:error, :invalid_image}
 
   def create_card(%Board{} = board, %User{id: user_id} = user, attrs) do
     # Default to the first stage if none supplied. Reject stages that don't

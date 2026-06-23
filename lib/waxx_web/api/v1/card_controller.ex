@@ -211,7 +211,7 @@ defmodule WaxxWeb.Api.V1.CardController do
 
   defp reload_card_with_notes(%Card{id: id}) do
     Repo.get!(Card, id)
-    |> Repo.preload([:assignees, :labels, :field_values, :notes])
+    |> Repo.preload([:assignees, :labels, :field_values, :notes, :background])
   end
 
   ## Helpers ------------------------------------------------------------

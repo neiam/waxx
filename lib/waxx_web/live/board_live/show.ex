@@ -185,6 +185,53 @@ defmodule WaxxWeb.BoardLive.Show do
      |> assign(:card_edit_form, nil)}
   end
 
+  # An image was pasted onto the open card. The hook hands us a data URL;
+  # the context decodes/validates it and stores the bytes. We reload the
+  # expanded card so the modal repaints with its new background.
+  def handle_event("set_card_background", %{"data_url" => data_url}, socket) do
+    guard_edit(socket, fn ->
+      case socket.assigns.expanded_card do
+        nil ->
+          {:noreply, socket}
+
+        card ->
+          case Kanban.set_card_background(card, data_url,
+                 actor: socket.assigns.current_scope.user
+               ) do
+            {:ok, _} ->
+              {:noreply, assign(socket, :expanded_card, Kanban.get_card(card.id))}
+
+            {:error, _} ->
+              {:noreply,
+               put_flash(
+                 socket,
+                 :error,
+                 "Couldn't use that as a background. Paste a PNG, JPG, GIF, or WebP under 5 MB."
+               )}
+          end
+      end
+    end)
+  end
+
+  # The hook short-circuits oversized pastes before sending them so we don't
+  # ship megabytes over the channel — just surface the reason.
+  def handle_event("card_background_too_large", _, socket) do
+    {:noreply, put_flash(socket, :error, "That image is too large (max 5 MB).")}
+  end
+
+  def handle_event("clear_card_background", _, socket) do
+    guard_edit(socket, fn ->
+      case socket.assigns.expanded_card do
+        nil ->
+          {:noreply, socket}
+
+        card ->
+          Kanban.clear_card_background(card, actor: socket.assigns.current_scope.user)
+          {:noreply, assign(socket, :expanded_card, Kanban.get_card(card.id))}
+      end
+    end)
+  end
+
   # Flips the per-(user, board) "hide label text" preference. We drive
   # off the LiveView's `:hide_label_text` assign (the live truth) rather
   # than the socket's cached `current_scope.user.preferences`, which is
@@ -726,6 +773,49 @@ defmodule WaxxWeb.BoardLive.Show do
         />
       <% end %>
 
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".CardPaste" phx-no-curly-interpolation>
+        export default {
+          mounted() {
+            // Only editors get to set a background.
+            if (this.el.dataset.canEdit !== "1") return;
+
+            const MAX = 5_000_000;
+
+            this.onPaste = (e) => {
+              const items = (e.clipboardData && e.clipboardData.items) || [];
+              for (const item of items) {
+                if (!item.type || !item.type.startsWith("image/")) continue;
+
+                const file = item.getAsFile();
+                if (!file) continue;
+
+                e.preventDefault();
+
+                if (file.size > MAX) {
+                  this.pushEvent("card_background_too_large", {});
+                  return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = () => {
+                  this.pushEvent("set_card_background", { data_url: reader.result });
+                };
+                reader.readAsDataURL(file);
+                return;
+              }
+            };
+
+            // Listen on the document so a paste lands even when nothing inside
+            // the modal is focused. The listener lives only while the modal
+            // (and thus this hook) is mounted.
+            document.addEventListener("paste", this.onPaste);
+          },
+
+          destroyed() {
+            document.removeEventListener("paste", this.onPaste);
+          }
+        }
+      </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".KanbanDnD" phx-no-curly-interpolation>
         export default {
           mounted() {
@@ -1046,11 +1136,20 @@ defmodule WaxxWeb.BoardLive.Show do
     />
     <div
       id="card-modal"
+      phx-hook=".CardPaste"
+      data-can-edit={if Kanban.can_edit?(@role), do: "1", else: "0"}
       class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-base-100 border border-base-300 rounded-box w-[90vw] max-w-xl max-h-[85vh] overflow-y-auto z-50 shadow-xl"
+      style={card_bg_style(@card)}
     >
       <div class="p-4 border-b border-base-300 flex items-start gap-3">
         <div class="flex-1 min-w-0">
           <p class="text-xs opacity-60 mb-1">In stage: {@card.board_stage.name}</p>
+          <p
+            :if={Kanban.can_edit?(@role) and not has_background?(@card)}
+            class="text-[10px] opacity-40 mb-1"
+          >
+            Tip: paste an image to set a card background.
+          </p>
 
           <%= if @editing do %>
             <.form
@@ -1101,6 +1200,16 @@ defmodule WaxxWeb.BoardLive.Show do
             title="Edit title and description"
           >
             <.icon name="hero-pencil-square-micro" class="size-4" />
+          </button>
+          <button
+            :if={Kanban.can_edit?(@role) and has_background?(@card)}
+            type="button"
+            phx-click="clear_card_background"
+            class="btn btn-ghost btn-sm"
+            aria-label="Remove background"
+            title="Remove background image"
+          >
+            <.icon name="hero-photo-micro" class="size-4" />
           </button>
           <button
             type="button"
@@ -1472,6 +1581,24 @@ defmodule WaxxWeb.BoardLive.Show do
   end
 
   defp hex_to_rgba(_, _), do: nil
+
+  defp has_background?(%{background: %Waxx.Kanban.CardBackground{}}), do: true
+  defp has_background?(_), do: false
+
+  # Inline style for the card modal when it has a pasted background. The image
+  # is inlined as a data URL and a translucent `base-100` layer is painted on
+  # top (via `color-mix`, so it tracks the active daisyUI theme) — that's the
+  # "blend": the photo reads through, but stays muted enough that the card's
+  # text and controls remain legible on every theme.
+  defp card_bg_style(%{background: %Waxx.Kanban.CardBackground{} = bg}) do
+    url = "data:#{bg.content_type};base64,#{Base.encode64(bg.image_data)}"
+    overlay = "color-mix(in srgb, var(--color-base-100) 72%, transparent)"
+
+    "background-image: linear-gradient(#{overlay}, #{overlay}), url(#{url}); " <>
+      "background-size: cover; background-position: center;"
+  end
+
+  defp card_bg_style(_), do: nil
 
   defp note_stage_name(%{board_stage_id: nil}, _board), do: "(no stage)"
 

@@ -217,6 +217,17 @@ data class CardDetail(
     val label_ids: List<String> = emptyList(),
     val field_values: List<CardFieldValue> = emptyList(),
     val notes: List<CardNote> = emptyList(),
+    val background: CardBackground? = null,
+)
+
+/**
+ * A pasted background image for a card. `data` is the base64-encoded image
+ * bytes; only delivered on the single-card detail payload, never the list.
+ */
+@Serializable
+data class CardBackground(
+    val content_type: String,
+    val data: String,
 )
 
 @Serializable

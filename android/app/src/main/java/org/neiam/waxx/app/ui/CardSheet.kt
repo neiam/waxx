@@ -1,5 +1,8 @@
 package org.neiam.waxx.app.ui
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,10 +49,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.neiam.waxx.app.data.AddAssigneeBody
 import org.neiam.waxx.app.data.BoardMembership
+import org.neiam.waxx.app.data.CardBackground
 import org.neiam.waxx.app.data.CardDetail
 import org.neiam.waxx.app.data.CardSummary
 import org.neiam.waxx.app.data.CreateNoteBody
@@ -124,7 +131,27 @@ fun CardSheet(
     val labelDefs = workflow?.labels.orEmpty()
     val subboardDefs = workflow?.subboards.orEmpty().sortedBy { it.position }
 
+    // A pasted background image (set from the web) decoded once per change.
+    // Painted behind the sheet content with a translucent `surface` overlay so
+    // it blends into the card and the text stays legible — mirroring the web.
+    val background = detail?.background
+    val backgroundBitmap = remember(background?.data) { decodeBackground(background) }
+
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+      Box(modifier = Modifier.fillMaxWidth()) {
+        if (backgroundBitmap != null) {
+            Image(
+                bitmap = backgroundBitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
+            )
+        }
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -380,6 +407,7 @@ fun CardSheet(
                 }
             }
         }
+      }
     }
 
     if (confirmDelete) {
@@ -400,6 +428,18 @@ fun CardSheet(
                 TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+// Decodes a card's base64 background payload into an ImageBitmap, or null if
+// it's absent or unreadable (a bad payload just means no background, not a crash).
+private fun decodeBackground(background: CardBackground?): ImageBitmap? {
+    val data = background?.data ?: return null
+    return try {
+        val bytes = Base64.decode(data, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    } catch (_: Exception) {
+        null
     }
 }
 

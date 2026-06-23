@@ -12,6 +12,7 @@ defmodule Waxx.Kanban.Card do
     CardLabel,
     CardFieldValue,
     CardNote,
+    CardBackground,
     Subboard
   }
 
@@ -38,6 +39,8 @@ defmodule Waxx.Kanban.Card do
 
     has_many :field_values, CardFieldValue
     has_many :notes, CardNote, preload_order: [asc: :position, asc: :inserted_at]
+
+    has_one :background, CardBackground
 
     timestamps(type: :utc_datetime)
   end

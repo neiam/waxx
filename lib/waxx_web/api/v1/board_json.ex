@@ -23,6 +23,7 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
     BoardTransition,
     Card,
     CardNote,
+    CardBackground,
     Membership,
     Subboard
   }
@@ -153,11 +154,25 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
   not on the list payload (`cards/1`) — would bloat every board fetch.
   """
   def card_detail_response(%Card{} = c) do
-    %{card: c |> card() |> Map.put(:notes, render_notes(c))}
+    %{
+      card:
+        c
+        |> card()
+        |> Map.put(:notes, render_notes(c))
+        |> Map.put(:background, render_background(c))
+    }
   end
 
   defp render_notes(%Card{notes: %Ecto.Association.NotLoaded{}}), do: []
   defp render_notes(%Card{notes: notes}) when is_list(notes), do: Enum.map(notes, &note/1)
+
+  # The image bytes are base64-encoded so the client can decode straight to a
+  # bitmap. Only present on the single-card detail payload — never the list.
+  defp render_background(%Card{background: %CardBackground{} = bg}) do
+    %{content_type: bg.content_type, data: Base.encode64(bg.image_data)}
+  end
+
+  defp render_background(_), do: nil
 
   def note(%CardNote{} = n) do
     %{

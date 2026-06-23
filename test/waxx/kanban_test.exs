@@ -777,6 +777,57 @@ defmodule Waxx.KanbanTest do
     end
   end
 
+  describe "card backgrounds" do
+    # 1x1 transparent PNG.
+    @png_data_url "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+    setup do
+      user = AccountsFixtures.user_fixture()
+      board = Waxx.KanbanFixtures.board_fixture(user)
+      card = Waxx.KanbanFixtures.card_fixture(board, user)
+      %{user: user, board: board, card: card}
+    end
+
+    test "set + get_card round-trips the image and content type", %{card: card} do
+      assert {:ok, bg} = Kanban.set_card_background(card, @png_data_url)
+      assert bg.content_type == "image/png"
+      assert byte_size(bg.image_data) > 0
+
+      loaded = Kanban.get_card(card.id)
+      assert loaded.background.content_type == "image/png"
+      assert loaded.background.image_data == bg.image_data
+    end
+
+    test "setting twice replaces the existing row (one per card)", %{card: card} do
+      assert {:ok, _} = Kanban.set_card_background(card, @png_data_url)
+
+      other = "data:image/gif;base64,#{Base.encode64("GIF89a-not-a-real-gif")}"
+      assert {:ok, bg} = Kanban.set_card_background(card, other)
+      assert bg.content_type == "image/gif"
+
+      assert Waxx.Repo.aggregate(
+               from(b in Waxx.Kanban.CardBackground, where: b.card_id == ^card.id),
+               :count
+             ) == 1
+    end
+
+    test "rejects a non-image content type", %{card: card} do
+      bad = "data:text/plain;base64,#{Base.encode64("hello")}"
+      assert {:error, %Ecto.Changeset{}} = Kanban.set_card_background(card, bad)
+      assert Kanban.get_card(card.id).background == nil
+    end
+
+    test "rejects a malformed data URL", %{card: card} do
+      assert {:error, :invalid_image} = Kanban.set_card_background(card, "not-a-data-url")
+    end
+
+    test "clear removes the background", %{card: card} do
+      assert {:ok, _} = Kanban.set_card_background(card, @png_data_url)
+      assert :ok = Kanban.clear_card_background(card)
+      assert Kanban.get_card(card.id).background == nil
+    end
+  end
+
   ## -- helpers --------------------------------------------------------------
 
   defp build_template_with_two_stages_and_transition(user) do
