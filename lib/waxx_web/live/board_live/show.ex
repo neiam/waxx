@@ -774,6 +774,7 @@ defmodule WaxxWeb.BoardLive.Show do
               board={@board}
               card_templates={@card_templates}
               hide_label_text={@hide_label_text}
+              background_versions={@background_versions}
             />
 
             <%= for sb <- @board.subboards do %>
@@ -789,6 +790,7 @@ defmodule WaxxWeb.BoardLive.Show do
                 board={@board}
                 card_templates={@card_templates}
                 hide_label_text={@hide_label_text}
+                background_versions={@background_versions}
               />
             <% end %>
           </div>
@@ -1038,6 +1040,7 @@ defmodule WaxxWeb.BoardLive.Show do
   attr :board, :map, required: true
   attr :card_templates, :list, default: []
   attr :hide_label_text, :boolean, default: false
+  attr :background_versions, :map, default: %{}
 
   defp stage_cell(assigns) do
     ~H"""
