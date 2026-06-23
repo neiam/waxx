@@ -2,4 +2,19 @@
 set -eu
 
 cd -P -- "$(dirname -- "$0")"
+
+# Auto-migrate on boot unless explicitly disabled. `Ecto.Migrator` takes a
+# Postgres advisory lock while migrating, so when several replicas start at
+# once (rolling update) they serialize safely: the first applies the pending
+# migrations and the rest find nothing to do. Migrations run in a separate
+# short-lived node and `set -e` aborts the boot if they fail, so we never
+# start a server against a half-migrated schema.
+#
+# Set WAXX_SKIP_MIGRATIONS=1 to opt out — e.g. if you'd rather run them from
+# a dedicated Job / initContainer.
+if [ "${WAXX_SKIP_MIGRATIONS:-0}" != "1" ]; then
+  echo "[server] running pending migrations" >&2
+  ./waxx eval Waxx.Release.migrate
+fi
+
 PHX_SERVER=true exec ./waxx start

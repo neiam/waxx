@@ -213,6 +213,33 @@ defmodule WaxxWeb.BoardLive.Show do
     end)
   end
 
+  # Pasting an image *link* (clipboard holds a URL, not image bytes). The
+  # server fetches it — the browser can't, cross-origin.
+  def handle_event("set_card_background_url", %{"url" => url}, socket) do
+    guard_edit(socket, fn ->
+      case socket.assigns.expanded_card do
+        nil ->
+          {:noreply, socket}
+
+        card ->
+          case Kanban.set_card_background_from_url(card, url,
+                 actor: socket.assigns.current_scope.user
+               ) do
+            {:ok, _} ->
+              {:noreply, assign(socket, :expanded_card, Kanban.get_card(card.id))}
+
+            {:error, _} ->
+              {:noreply,
+               put_flash(
+                 socket,
+                 :error,
+                 "Couldn't load that image link. It must point to a PNG, JPG, GIF, or WebP under 5 MB."
+               )}
+          end
+      end
+    end)
+  end
+
   # The hook short-circuits oversized pastes before sending them so we don't
   # ship megabytes over the channel — just surface the reason.
   def handle_event("card_background_too_large", _, socket) do
@@ -782,9 +809,16 @@ defmodule WaxxWeb.BoardLive.Show do
             const MAX = 5_000_000;
 
             this.onPaste = (e) => {
-              const items = (e.clipboardData && e.clipboardData.items) || [];
-              for (const item of items) {
-                if (!item.type || !item.type.startsWith("image/")) continue;
+              const items = e.clipboardData && e.clipboardData.items;
+              if (!items) return;
+
+              // `DataTransferItemList` is array-like but not reliably
+              // iterable (no Symbol.iterator in Chrome), so index it by hand
+              // rather than `for...of` — the latter throws and the paste
+              // silently does nothing.
+              for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
 
                 const file = item.getAsFile();
                 if (!file) continue;
@@ -802,6 +836,15 @@ defmodule WaxxWeb.BoardLive.Show do
                 };
                 reader.readAsDataURL(file);
                 return;
+              }
+
+              // No image bytes on the clipboard — fall back to a pasted image
+              // *link* (copying an image URL yields text/plain). The server
+              // fetches it, since the browser can't cross-origin.
+              const text = (e.clipboardData.getData("text/plain") || "").trim();
+              if (/^https?:\/\/\S+$/i.test(text)) {
+                e.preventDefault();
+                this.pushEvent("set_card_background_url", { url: text });
               }
             };
 

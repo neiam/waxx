@@ -951,31 +951,47 @@ defmodule Waxx.Kanban do
   """
   def set_card_background(%Card{} = card, data_url, opts \\ []) when is_binary(data_url) do
     with {:ok, content_type, bytes} <- decode_data_url(data_url) do
-      result =
-        %CardBackground{}
-        |> CardBackground.changeset(%{
-          card_id: card.id,
-          content_type: content_type,
-          image_data: bytes
-        })
-        |> Repo.insert(
-          on_conflict: {:replace, [:content_type, :image_data, :updated_at]},
-          conflict_target: :card_id
-        )
-
-      with {:ok, _bg} <- result do
-        log(card.board_id, opts[:actor], "card_updated",
-          card_id: card.id,
-          meta: %{changes: ["background"], title: card.title}
-        )
-
-        # Repaints the card for every viewer who has it open — `:cards_changed`
-        # re-fetches the expanded card (and its newly-set background).
-        broadcast_cards_changed(card.board_id)
-      end
-
-      result
+      store_background(card, content_type, bytes, opts)
     end
+  end
+
+  @doc """
+  Sets a card's background from a remote image URL. The server fetches the
+  bytes (the browser can't, cross-origin) and stores them, so a user can
+  paste an image link rather than the image itself. Returns `{:ok, background}`
+  or `{:error, reason}`.
+  """
+  def set_card_background_from_url(%Card{} = card, url, opts \\ []) when is_binary(url) do
+    with {:ok, content_type, bytes} <- fetch_image(url) do
+      store_background(card, content_type, bytes, opts)
+    end
+  end
+
+  defp store_background(%Card{} = card, content_type, bytes, opts) do
+    result =
+      %CardBackground{}
+      |> CardBackground.changeset(%{
+        card_id: card.id,
+        content_type: content_type,
+        image_data: bytes
+      })
+      |> Repo.insert(
+        on_conflict: {:replace, [:content_type, :image_data, :updated_at]},
+        conflict_target: :card_id
+      )
+
+    with {:ok, _bg} <- result do
+      log(card.board_id, opts[:actor], "card_updated",
+        card_id: card.id,
+        meta: %{changes: ["background"], title: card.title}
+      )
+
+      # Repaints the card for every viewer who has it open — `:cards_changed`
+      # re-fetches the expanded card (and its newly-set background).
+      broadcast_cards_changed(card.board_id)
+    end
+
+    result
   end
 
   @doc "Removes a card's background image, if any. Always returns `:ok`."
@@ -1007,6 +1023,61 @@ defmodule Waxx.Kanban do
   end
 
   defp decode_data_url(_), do: {:error, :invalid_image}
+
+  # Fetches a remote image URL server-side and returns `{content_type, bytes}`.
+  #
+  # Guards: http(s) only, capped download size, and the response must declare an
+  # allowed image content type. NOTE: this is a server-side fetch of a
+  # user-supplied URL (a limited SSRF surface) — acceptable for a trusted-team
+  # tool, but worth a deny-list / egress policy if this is ever exposed widely.
+  defp fetch_image(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        do_fetch_image(url)
+
+      _ ->
+        {:error, :invalid_image}
+    end
+  end
+
+  defp do_fetch_image(url) do
+    max = CardBackground.max_bytes()
+
+    case Req.get(url,
+           max_redirects: 3,
+           receive_timeout: 10_000,
+           connect_options: [timeout: 5_000],
+           decode_body: false,
+           retry: false
+         ) do
+      {:ok, %Req.Response{status: 200, headers: headers, body: body}}
+      when is_binary(body) and byte_size(body) > 0 ->
+        content_type = headers |> header_value("content-type") |> normalize_content_type()
+
+        cond do
+          byte_size(body) > max -> {:error, :invalid_image}
+          content_type in CardBackground.content_types() -> {:ok, content_type, body}
+          true -> {:error, :invalid_image}
+        end
+
+      _ ->
+        {:error, :invalid_image}
+    end
+  rescue
+    _ -> {:error, :invalid_image}
+  end
+
+  # Req lowercases header names and returns values as a list.
+  defp header_value(headers, name) do
+    headers |> Map.get(name, []) |> List.first()
+  end
+
+  defp normalize_content_type(nil), do: nil
+
+  defp normalize_content_type(ct) when is_binary(ct) do
+    ct |> String.split(";", parts: 2) |> hd() |> String.trim() |> String.downcase()
+  end
 
   def create_card(%Board{} = board, %User{id: user_id} = user, attrs) do
     # Default to the first stage if none supplied. Reject stages that don't

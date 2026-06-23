@@ -821,6 +821,16 @@ defmodule Waxx.KanbanTest do
       assert {:error, :invalid_image} = Kanban.set_card_background(card, "not-a-data-url")
     end
 
+    test "set_card_background_from_url rejects non-http(s) URLs without fetching", %{card: card} do
+      assert {:error, :invalid_image} =
+               Kanban.set_card_background_from_url(card, "ftp://example.com/x.png")
+
+      assert {:error, :invalid_image} =
+               Kanban.set_card_background_from_url(card, "file:///etc/passwd")
+
+      assert {:error, :invalid_image} = Kanban.set_card_background_from_url(card, "not a url")
+    end
+
     test "clear removes the background", %{card: card} do
       assert {:ok, _} = Kanban.set_card_background(card, @png_data_url)
       assert :ok = Kanban.clear_card_background(card)
