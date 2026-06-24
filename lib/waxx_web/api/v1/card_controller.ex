@@ -132,6 +132,26 @@ defmodule WaxxWeb.Api.V1.CardController do
     end
   end
 
+  ## Background image bytes --------------------------------------------
+  #
+  # Served separately so the board's card list never carries image bytes —
+  # tiles reference this lazily and cache-bust on the `?v=` version from the
+  # list payload's `background_version`.
+  def background(conn, %{"id" => id}) do
+    user = conn.assigns.current_scope.user
+
+    case Kanban.fetch_card_background_for_user(id, user) do
+      {:ok, bg} ->
+        conn
+        |> put_resp_header("cache-control", "private, max-age=31536000, immutable")
+        |> put_resp_content_type(bg.content_type, nil)
+        |> send_resp(200, bg.image_data)
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
   ## Labels -------------------------------------------------------------
 
   def toggle_label(conn, %{"id" => card_id, "label_id" => label_id}) do

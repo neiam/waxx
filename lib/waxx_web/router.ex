@@ -131,6 +131,7 @@ defmodule WaxxWeb.Router do
       delete "/cards/:id", CardController, :delete
 
       get "/cards/:id", CardController, :show
+      get "/cards/:id/background", CardController, :background
       post "/cards/:id/labels/:label_id/toggle", CardController, :toggle_label
       put "/cards/:id/fields/:field_id", CardController, :set_field
       post "/cards/:id/assignees", CardController, :add_assignee

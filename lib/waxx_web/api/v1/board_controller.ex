@@ -64,7 +64,7 @@ defmodule WaxxWeb.Api.V1.BoardController do
     with {:ok, _} <- fetch_board(id, user) do
       board = Kanban.get_board_with_workflow!(id, user)
       cards = Kanban.list_cards(board)
-      json(conn, BoardJSON.cards(cards))
+      json(conn, BoardJSON.cards(cards, Kanban.background_versions(board)))
     end
   end
 

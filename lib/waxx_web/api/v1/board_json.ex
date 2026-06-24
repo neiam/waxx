@@ -142,8 +142,8 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
 
   ## Cards ---------------------------------------------------------------
 
-  def cards(cards) when is_list(cards) do
-    %{cards: Enum.map(cards, &card/1)}
+  def cards(cards, versions \\ %{}) when is_list(cards) do
+    %{cards: Enum.map(cards, &card(&1, versions))}
   end
 
   @doc "Single-card envelope used by mutation endpoints."
@@ -339,7 +339,7 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
     }
   end
 
-  def card(%Card{} = c) do
+  def card(%Card{} = c, versions \\ %{}) do
     %{
       id: c.id,
       title: c.title,
@@ -352,6 +352,9 @@ defmodule WaxxWeb.Api.V1.BoardJSON do
       assignee_ids: assignee_ids(c.assignees),
       label_ids: label_ids(c.labels),
       field_values: field_values(c.field_values),
+      # Present only when the card has a background image; the client uses it
+      # to flag the tile and cache-bust GET /cards/:id/background.
+      background_version: Map.get(versions, c.id),
       inserted_at: c.inserted_at,
       updated_at: c.updated_at
     }

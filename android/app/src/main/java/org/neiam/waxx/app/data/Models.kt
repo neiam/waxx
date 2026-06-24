@@ -157,6 +157,8 @@ data class CardSummary(
     val assignee_ids: List<String> = emptyList(),
     val label_ids: List<String> = emptyList(),
     val field_values: List<CardFieldValue> = emptyList(),
+    // Set when the card has a background image; also cache-busts the image URL.
+    val background_version: Long? = null,
 )
 
 @Serializable

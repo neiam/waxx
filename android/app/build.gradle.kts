@@ -68,4 +68,5 @@ dependencies {
 
     implementation(libs.zxing.android.embedded)
     implementation(libs.phoenix.client)
+    implementation(libs.coil.compose)
 }

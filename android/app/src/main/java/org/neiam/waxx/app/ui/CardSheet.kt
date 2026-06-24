@@ -149,7 +149,7 @@ fun CardSheet(
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f)),
             )
         }
         LazyColumn(

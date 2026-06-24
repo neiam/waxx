@@ -20,7 +20,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -237,6 +241,7 @@ fun BoardScreen(
                     Kanban(
                         workflow = s.workflow,
                         cards = s.cards,
+                        creds = creds,
                         onOpenCard = onOpenCard,
                         dragState = dragState,
                         onDropFinished = ::handleDrop,
@@ -335,6 +340,7 @@ private fun Banner(text: String, color: androidx.compose.ui.graphics.Color) {
 private fun Kanban(
     workflow: Workflow,
     cards: List<CardSummary>,
+    creds: TokenStore.Credentials?,
     onOpenCard: (CardSummary) -> Unit,
     dragState: DragState,
     onDropFinished: () -> Unit,
@@ -390,6 +396,7 @@ private fun Kanban(
                     showStageLabel = true,
                     cards = cardsByCell[stage.id to null].orEmpty(),
                     workflow = workflow,
+                    creds = creds,
                     dragState = dragState,
                     onOpenCard = onOpenCard,
                     onDropFinished = onDropFinished,
@@ -453,6 +460,7 @@ private fun Kanban(
                             showStageLabel = false,
                             cards = cardsByCell[stage.id to sb?.id].orEmpty(),
                             workflow = workflow,
+                            creds = creds,
                             dragState = dragState,
                             onOpenCard = onOpenCard,
                             onDropFinished = onDropFinished,
@@ -472,6 +480,7 @@ private fun StageCell(
     showStageLabel: Boolean,
     cards: List<CardSummary>,
     workflow: Workflow,
+    creds: TokenStore.Credentials?,
     dragState: DragState,
     onOpenCard: (CardSummary) -> Unit,
     onDropFinished: () -> Unit,
@@ -553,6 +562,7 @@ private fun StageCell(
                             card = c,
                             fromStageId = stage.id,
                             fromSubboardId = subboard?.id,
+                            creds = creds,
                             dragState = dragState,
                             onClick = { onOpenCard(c) },
                             onDropFinished = onDropFinished,
@@ -569,12 +579,24 @@ private fun CardChip(
     card: CardSummary,
     fromStageId: String,
     fromSubboardId: String?,
+    creds: TokenStore.Credentials?,
     dragState: DragState,
     onClick: () -> Unit,
     onDropFinished: () -> Unit,
 ) {
     var chipOrigin by remember { mutableStateOf(Offset.Zero) }
     val isMe = dragState.session?.card?.id == card.id
+
+    // Background image, fetched lazily by Coil from the authenticated API. The
+    // `?v=` version cache-busts when it changes. Bytes never ride along with
+    // the board's card list — only the version flag does.
+    val backgroundModel = remember(creds, card.id, card.background_version) {
+        if (creds != null && card.background_version != null) {
+            "${creds.baseUrl}/api/v1/cards/${card.id}/background?v=${card.background_version}"
+        } else {
+            null
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -600,14 +622,35 @@ private fun CardChip(
             .clickable(onClick = onClick)
             .then(if (isMe) Modifier.border(2.dp, Color(0xFF40A0FF), RoundedCornerShape(6.dp)) else Modifier),
     ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            Text(card.title, style = MaterialTheme.typography.bodyMedium)
-            if (!card.description.isNullOrBlank()) {
-                Text(
-                    card.description.take(80),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (backgroundModel != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(backgroundModel)
+                        .addHeader("Authorization", "Bearer ${creds!!.token}")
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize(),
                 )
+                // Blend the photo into the surface so the text stays legible —
+                // a touch stronger than the modal since tiles are small.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)),
+                )
+            }
+            Column(modifier = Modifier.padding(8.dp)) {
+                Text(card.title, style = MaterialTheme.typography.bodyMedium)
+                if (!card.description.isNullOrBlank()) {
+                    Text(
+                        card.description.take(80),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

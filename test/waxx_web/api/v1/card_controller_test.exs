@@ -169,6 +169,59 @@ defmodule WaxxWeb.Api.V1.CardControllerTest do
     end
   end
 
+  describe "GET /api/v1/boards/:board_id/cards (background_version)" do
+    @png_data_url "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+    test "lists background_version only for cards that have a background", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      with_bg = card_fixture(board, user, %{"title" => "art"})
+      without_bg = card_fixture(board, user, %{"title" => "plain"})
+      {:ok, _} = Kanban.set_card_background(with_bg, @png_data_url)
+
+      conn = conn |> auth(token) |> get(~p"/api/v1/boards/#{board.id}/cards")
+      cards = json_response(conn, 200)["cards"]
+
+      assert %{"background_version" => v} = Enum.find(cards, &(&1["id"] == with_bg.id))
+      assert is_integer(v)
+      assert %{"background_version" => nil} = Enum.find(cards, &(&1["id"] == without_bg.id))
+    end
+  end
+
+  describe "GET /api/v1/cards/:id/background" do
+    @png_data_url "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+    test "serves the image bytes with its content type to a member", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+      {:ok, bg} = Kanban.set_card_background(card, @png_data_url)
+
+      conn = conn |> auth(token) |> get(~p"/api/v1/cards/#{card.id}/background")
+
+      assert response(conn, 200) == bg.image_data
+      assert get_resp_header(conn, "content-type") |> hd() =~ "image/png"
+    end
+
+    test "404 when the card has no background", %{conn: conn} do
+      %{token: token, board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+
+      conn = conn |> auth(token) |> get(~p"/api/v1/cards/#{card.id}/background")
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
+    end
+
+    test "404 for a non-member", %{conn: conn} do
+      %{board: board, user: user} = setup_owner()
+      card = card_fixture(board, user)
+      {:ok, _} = Kanban.set_card_background(card, @png_data_url)
+
+      stranger = confirmed_user_fixture()
+      token = api_token_fixture(stranger)
+
+      conn = conn |> auth(token) |> get(~p"/api/v1/cards/#{card.id}/background")
+      assert json_response(conn, 404)["error"]["code"] == "not_found"
+    end
+  end
+
   describe "DELETE /api/v1/cards/:id" do
     test "deletes the card", %{conn: conn} do
       %{token: token, board: board, user: user} = setup_owner()
