@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -353,6 +354,9 @@ private fun Kanban(
     }
 
     val scrollState = rememberScrollState()
+    // Vertical scroll for the 2-D (subboard) grid so rows past the viewport
+    // aren't clipped. Unused in the 1-D layout (columns scroll themselves).
+    val verticalScrollState = rememberScrollState()
     var viewportBounds by remember { mutableStateOf<Rect?>(null) }
     val density = LocalDensity.current
     val edgePx = with(density) { 80.dp.toPx() }
@@ -414,6 +418,7 @@ private fun Kanban(
             modifier = modifier
                 .onGloballyPositioned { viewportBounds = it.boundsInWindowSafe() }
                 .horizontalScroll(scrollState)
+                .verticalScroll(verticalScrollState)
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -465,6 +470,7 @@ private fun Kanban(
                             onOpenCard = onOpenCard,
                             onDropFinished = onDropFinished,
                             cellWidth = 240.dp,
+                            cardsScrollable = false,
                         )
                     }
                 }
@@ -485,6 +491,10 @@ private fun StageCell(
     onOpenCard: (CardSummary) -> Unit,
     onDropFinished: () -> Unit,
     cellWidth: androidx.compose.ui.unit.Dp = 280.dp,
+    // When the whole grid scrolls (2-D subboard layout), cells lay their cards
+    // out non-lazily so we don't nest a vertical scroll inside a vertical
+    // scroll. In the 1-D layout each column scrolls itself, so this stays true.
+    cardsScrollable: Boolean = true,
 ) {
     val session = dragState.session
     val isSource = session != null &&
@@ -553,20 +563,39 @@ private fun StageCell(
                     )
                 }
             } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
-                ) {
-                    items(cards.sortedBy { it.position }, key = { it.id }) { c ->
-                        CardChip(
-                            card = c,
-                            fromStageId = stage.id,
-                            fromSubboardId = subboard?.id,
-                            creds = creds,
-                            dragState = dragState,
-                            onClick = { onOpenCard(c) },
-                            onDropFinished = onDropFinished,
-                        )
+                val sorted = cards.sortedBy { it.position }
+                if (cardsScrollable) {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                    ) {
+                        items(sorted, key = { it.id }) { c ->
+                            CardChip(
+                                card = c,
+                                fromStageId = stage.id,
+                                fromSubboardId = subboard?.id,
+                                creds = creds,
+                                dragState = dragState,
+                                onClick = { onOpenCard(c) },
+                                onDropFinished = onDropFinished,
+                            )
+                        }
+                    }
+                } else {
+                    // Non-lazy: the whole grid scrolls, so nesting a scrollable
+                    // list here would crash with infinite height constraints.
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        sorted.forEach { c ->
+                            CardChip(
+                                card = c,
+                                fromStageId = stage.id,
+                                fromSubboardId = subboard?.id,
+                                creds = creds,
+                                dragState = dragState,
+                                onClick = { onOpenCard(c) },
+                                onDropFinished = onDropFinished,
+                            )
+                        }
                     }
                 }
             }
