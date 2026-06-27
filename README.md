@@ -171,6 +171,32 @@ mix ecto.drop && mix ecto.create && mix ecto.migrate
 MIX_ENV=test mix ecto.drop && MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate
 ```
 
+## Container images
+
+CI publishes a multi-registry image on every push to `master`:
+
+- `ghcr.io/neiam/waxx`
+- `docker.io/neiam/waxx`
+- `quay.io/neiam/waxx`
+
+Tags: `latest` (default branch), `vX.Y.Z` + `X.Y` (git tags), the branch name,
+and the commit SHA.
+
+```sh
+docker pull ghcr.io/neiam/waxx:latest
+
+docker run --rm -p 4000:4000 \
+  -e PHX_SERVER=true \
+  -e SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+  -e PHX_HOST=localhost \
+  -e POSTGRES_HOST=host.containers.internal \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=waxx \
+  ghcr.io/neiam/waxx:latest
+```
+
+Or set `DATABASE_URL=ecto://user:pass@host/db` instead of the discrete
+`POSTGRES_*` variables.
+
 ## Deployment
 
 The repo ships a Kubernetes deploy plan modelled on the one used for
